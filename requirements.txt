@@ -1,0 +1,4 @@
+pydantic
+# S2 接 Gemini 时再加下面两行：
+# google-genai
+# python-dotenv
