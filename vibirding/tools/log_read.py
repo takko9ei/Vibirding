@@ -1,4 +1,9 @@
-"""read_log — a READ-ONLY tool that looks up past observations.
+"""read_log — a READ-ONLY tool that looks up YOUR OWN past observations.
+
+It is a personal-history lookup / weak prior ("have I logged this species here or
+in this season before?"), NOT an authoritative season/range check — authoritative
+seasonality/distribution belongs to a distribution data source (e.g. eBird), see
+architecture section 11.
 
 S1 ships a FAKE version: it returns a small hardcoded list of sightings and does
 NOT touch any file (the real append-only log + query arrive in S4). It exists so
@@ -38,8 +43,9 @@ class ReadLogTool:
 
     name = "read_log"
     description = (
-        "查历史观测记录，可按地点(place)、鸟种(species)、日期范围(date_range)过滤；"
-        "用于核验某地某季是否见过某种鸟。"
+        "查你自己的历史观测记录，可按地点(place)、鸟种(species)、日期范围(date_range)过滤。"
+        "这是个人记录、弱先验（“我以前在这儿/这季节记录过什么”），"
+        "不是权威的季节/分布核验。"
     )
     # JSON Schema handed to the model as the function-declaration parameters.
     input_schema = {
