@@ -7,7 +7,7 @@ line.
 
 The loop is strictly provider-neutral: it only ever touches the normalized
 ModelResponse / ToolResult shapes. "tool_use" here is an INTERNAL normalized
-value — the loop never sees Gemini's raw shapes (GeminiClient handles that in S2).
+value — the loop never sees the provider's raw shapes (the client handles that).
 
 Contract (architecture section 6, signature locked from S1):
     run_agent_turn(messages, tools, llm, permissions, budget, trace, on_event=...)
@@ -35,7 +35,7 @@ def _preview(text: str | None, limit: int = 120) -> str:
 def run_agent_turn(
     messages: list[dict],
     tools,  # ToolRegistry — see module docstring
-    llm,  # LLMClient (MockClient in S1, GeminiClient in S2)
+    llm,  # LLMClient (MockClient offline; DeepSeekClient/GeminiClient for real models)
     permissions,
     budget,
     trace,

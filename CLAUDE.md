@@ -9,7 +9,7 @@
 
 - IMPORTANT: 严格按 @docs/architecture.md 的目录结构、数据结构(第4节)、
   契约(第6节)实现，不要自行发明或改动结构。
-- IMPORTANT: 一次只实现一个切片(第10节 S1–S7)，不要一次写多个切片。
+- IMPORTANT: 一次只实现一个切片(第10节 S1–S8)，不要一次写多个切片。
 - 每完成一个能跑的切片，停下等我 review，再 git commit。
 - 要改任何接口或数据结构，先改 @docs/architecture.md，再改代码。
 
@@ -22,9 +22,9 @@
 ## 技术约定
 
 - Python + pydantic 做数据校验。
-- 运行时模型用 Google Gemini（google-genai SDK，gemini-3.5-flash），不是 Anthropic。
-  GeminiClient 实现规格见 @docs/architecture.md 第6节。
-- 手动函数调用：只传 function declarations，自己执行、自己回 functionResponse，
-  不用 AutomaticFunctionCalling。
+- 运行时模型用 DeepSeek（OpenAI 兼容端点，openai SDK，deepseek-v4-flash），不是 Anthropic。
+  DeepSeekClient 实现规格见 @docs/architecture.md 第6节；GeminiClient 作为备用 provider 保留。
+- 手动函数调用：只声明 tools，自己执行、自己把结果作为 tool 消息回填，
+  不用任何 SDK 的自动函数执行。
 - 数据结构集中在 vibirding/schemas.py，最先定。
 - 先用 MockClient 把循环测通，再接真模型和真 API(S1→S2→S3)。

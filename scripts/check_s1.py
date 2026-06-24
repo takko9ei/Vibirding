@@ -2,7 +2,7 @@
 """S1 verification suite — one case per contract/edge, printed as a PASS/FAIL table.
 
 Dev-time only (scripts/ is for temporary smoke/verification scripts). Fully
-offline: no network, no Gemini. Run:
+offline: no network, no real model. Run:
 
     python scripts/check_s1.py
 
@@ -227,7 +227,7 @@ check("trace", "每行含 step/kind/summary/detail",
 # ── print table + cleanup ────────────────────────────────────────────────────
 def main() -> int:
     print("=" * 72)
-    print("S1 验证套件 — 离线、无网络、无 Gemini")
+    print("S1 验证套件 — 离线、无网络、无真实模型")
     print("=" * 72)
     cur = None
     passed = 0

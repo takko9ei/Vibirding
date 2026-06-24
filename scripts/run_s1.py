@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 """S1 offline smoke test — proves the model->tool->model loop runs end to end.
 
-Zero cost, no network, no Gemini: the model is a scripted MockClient and the only
+Zero cost, no network, no real model: the model is a scripted MockClient and the only
 tool is the fake read_log. Run it with:
 
     python scripts/run_s1.py
@@ -83,7 +83,7 @@ def main() -> int:
 
     events: list = []
     print("=" * 64)
-    print("S1 smoke：离线跑 model→tool→model 循环（MockClient，无网络、无 Gemini）")
+    print("S1 smoke：离线跑 model→tool→model 循环（MockClient，无网络、无真实模型）")
     print("用户笔记:", note)
     print("-" * 64)
 

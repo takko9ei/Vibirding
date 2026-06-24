@@ -2,7 +2,7 @@
 
 These models are completely provider-neutral: the loop, tools, memory and eval
 layers only ever speak in terms of the types defined here, never in terms of
-Gemini's native shapes. Per docs/architecture.md section 4, this file is locked
+the runtime provider's native shapes (DeepSeek/OpenAI). Per docs/architecture.md section 4, this file is locked
 first, before anything else is built.
 
 All models use pydantic for validation.
@@ -16,9 +16,9 @@ from pydantic import BaseModel, Field
 class ToolCall(BaseModel):
     """One tool request emitted by the model.
 
-    GeminiClient (S2) maps Gemini's ``function_call.id`` -> ``id`` and
-    ``function_call.args`` -> ``input``. In S1 the MockClient fills these
-    directly.
+    DeepSeekClient maps OpenAI's ``tool_call.id`` -> ``id`` and the JSON-string
+    ``tool_call.function.arguments`` -> ``input``. In S1 the MockClient fills
+    these directly.
     """
 
     id: str  # pairs this call with its matching ToolResult
@@ -38,9 +38,9 @@ class ModelResponse(BaseModel):
 
     This is the ONLY response shape the loop understands; it hides all provider
     differences. ``stop_reason`` holds an internal normalized value
-    ("tool_use" | "end_turn" | "max_tokens" | ...) — GeminiClient is responsible
-    for mapping Gemini's finish_reason / presence-of-function_call into these
-    values (Gemini itself has no "tool_use" concept).
+    ("tool_use" | "end_turn" | "max_tokens" | ...) — the client is responsible
+    for mapping the provider's finish_reason / presence-of-tool_calls into these
+    values (DeepSeekClient for the OpenAI-compatible API).
     """
 
     text: str | None = None  # textual answer (final answer or interim message)
@@ -66,7 +66,7 @@ class Observation(BaseModel):
     behavior: str | None = None
     raw_note: str  # the original messy note, always kept
     confidence: float | None = None  # from bird_id or the model's self-estimate
-    source: str  # "bird_id" | "manual" | "inferred"
+    source: str  # "user" | "bird_id" | "inferred" | "manual"
     flags: list[str] = Field(default_factory=list)  # e.g. ["season_unusual"]
 
 

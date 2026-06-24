@@ -1,8 +1,8 @@
 """MockClient — a scripted, offline stand-in for the real model.
 
 It returns a preset list of ModelResponse objects, one per complete() call, in
-order. It never touches the network and never imports google-genai. Because its
-return shape is identical to S2's GeminiClient, the loop can swap clients without
+order. It never touches the network and never imports any provider SDK. Because
+its return shape is identical to the real DeepSeekClient, the loop can swap clients without
 noticing — which is exactly what lets us debug the whole loop for free.
 
 Contract (architecture section 6):
