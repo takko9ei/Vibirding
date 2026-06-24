@@ -2,7 +2,7 @@
 
 > 本文件是“当前进度快照”，给冷启动（无上下文）的人快速对齐用。
 > **唯一事实来源仍是 [docs/architecture.md](architecture.md)**；本文若与 architecture 冲突，以 architecture 为准。
-> 最后更新：完成“全库一致性修订（Gemini→DeepSeek 措辞传导）”之后。
+> 最后更新：完成“docs 入库治理”（把唯一事实来源 architecture.md 纳入版本控制、从 .gitignore 移除 docs/ 与 CLAUDE.md、校正本文件 git 状态）之后。
 
 ---
 
@@ -41,7 +41,11 @@
 
 ## 4. 与 architecture.md 已对齐的最近重要改动（时间倒序）
 
-1. **全库一致性修订**（本批，**尚未提交**）
+0. **docs 入库治理**（本批）
+   - 改了什么：从 `.gitignore` 移除 `docs/` 与 `CLAUDE.md` 两行；**首次把 `docs/architecture.md`（唯一事实来源）的最新版提交进 git**；校正本 STATUS.md 的 §4/§7/§8。
+   - 为什么：`docs/` 自 `b05fed2 "change on gitignore"` 起被忽略、且 architecture.md 当时被 `git rm --cached` 移出跟踪，导致此后所有架构大更新（range_check 升 S3、Gemini→DeepSeek、裁决规则…）**一直没进版本控制**——唯一事实来源只剩工作树一份、随时可能丢；STATUS.md 旧版还误称其“已提交”。
+
+1. **全库一致性修订**（commit `911c4ba`，**已提交**）
    - 改了什么：把 architecture 的 DeepSeek 迁移传导到代码注释 + `CLAUDE.md`/`DECISIONS.md`（去 Gemini 化）、`schemas.source` 注释加 `"user"`、切片号 `S1–S7→S1–S8`、删 `scripts/smoke.py`。
    - 为什么：之前 Gemini→DeepSeek 只改了 architecture.md，没传导，造成全库 provider 措辞/编号/取值不一致。
 
@@ -49,7 +53,7 @@
    - 改了什么：`agent/prompt.py` 写入四分支裁决（用户指定 > 图片鉴定 > 描述推断经 range_check）；`schemas.source` 引入 `"user"` 取值。
    - 为什么：明确“species 该信谁的”，冲突时打 `autoid_conflict`，没把握时 `species=null`+`low_confidence`。
 
-3. **architecture.md 文档大更新**（已提交）
+3. **architecture.md 文档大更新**（内容早已写入工作树，但因 `docs/` 被忽略**直到本批第 0 条才真正提交进 git**）
    - 改了什么：`range_check` 由“可选进阶”升格为正式新 **S3**（原视觉鉴种→S4，整体顺延到 S8）；全文 Gemini→DeepSeek；§8 加裁决规则；§3 补 `range_check.py`。
    - 为什么：季节/分布核验应有权威工具（eBird），且运行时已换 DeepSeek。
 
@@ -88,18 +92,16 @@
 ---
 
 ## 7. 已知未决 / 需人拍板
-- **上一批一致性修订（9 个文件）尚未 commit**：见 §8，待提交。
 - **DeepSeek 账户额度**：真模型验收时遇到过 `429 RESOURCE_EXHAUSTED`（prepayment credits depleted，预付额度耗尽）和 `503`（过载）。跑真模型前需确认账户有额度。
-- **range_check 何时开工 / 是否现在申请 eBird key**（涉及账号与成本），待定。
-- `scripts/run_s2.py`（Gemini 入口）是 throwaway，最终会删。
-- `.gitignore` 把 `docs/` 列入忽略：`docs/` 下新建文件（如本 STATUS.md）需 `git add -f` 才能提交；是否要清理这条忽略规则，待定（本批未动）。
+- **range_check 何时开工 / 是否现在申请 eBird key**（涉及账号与成本），待定——这是“下一步”的决策点，不属遗留。
+- `scripts/run_s2.py`（Gemini 入口）暂**保留**为备用 provider 的参考入口（本批决定不删）。
+
+> 本批已清掉的旧遗留：①“一致性修订 9 文件尚未 commit”（实为已提交，`911c4ba`/`8a898af`）；②`docs/` 被 gitignore 致 architecture.md 未入库（已从 .gitignore 移除 `docs/` 与 `CLAUDE.md` 并首次提交 architecture.md）。
 
 ---
 
 ## 8. git 状态
-- **最近一次 commit**：`cad77db fix: prompt`（prompt.py 物种来源优先级）。
-- 之前：`cd8038a feature: add deepseek client` → `08b6ccf feature: add gemini client` → `0e7dbda feature: s1 finished`。
-- **未提交的改动**（上一批“全库一致性修订”，待提交）：
-  - 修改：`CLAUDE.md`、`DECISIONS.md`、`scripts/check_s1.py`、`scripts/run_s1.py`、`vibirding/agent/loop.py`、`vibirding/llm/__init__.py`、`vibirding/llm/mock.py`、`vibirding/schemas.py`
-  - 删除：`scripts/smoke.py`
-- 本文件 `docs/STATUS.md` 为**新增**（提交时需 `git add -f`，因 `docs/` 被 gitignore）。
+- **本批（docs 入库治理）**：从 `.gitignore` 移除 `docs/` 与 `CLAUDE.md`；首次提交 `docs/architecture.md`（唯一事实来源，此前一直被忽略、未入库）；校正本 STATUS.md 的 §4/§7/§8。提交后即为新的 HEAD。
+- 之前 HEAD 链：`911c4ba`（全库一致性修订：去 Gemini 化措辞 + 删 `scripts/smoke.py`）→ `8a898af docs: add STATUS.md` → `cad77db fix: prompt`（物种来源优先级）→ `cd8038a add deepseek client` → `08b6ccf add gemini client` → `0e7dbda s1 finished`。
+- 注：早先 `git status` 看似 clean，是因为 architecture.md 被 `.gitignore` 屏蔽而**不显示为未跟踪**——这正是它一直漏掉入库的原因，本批已修复。
+- 自此 `docs/` 下文件正常跟踪，新增/改动**不再需要 `git add -f`**。
