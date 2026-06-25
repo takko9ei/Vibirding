@@ -23,7 +23,7 @@
 | **S5** | ⬜ 未开始 | `memory/log` 的 append/query + `append_log` 写入 + 完整权限闸（写前审批）。注：薄版 permissions 已在 S1 就位，但写入链路与真审批未做。 |
 | **S6** | ⬜ 未开始（薄版已存在） | 完整 `budget`（token 预算）+ 工具报错容错。注：薄版 budget（仅 max_steps 止捞）已在 S1 就位并锁定签名。 |
 | **S7** | ⬜ 未开始 | `evals`：`evals/tasks.yaml` + `evals/run_evals.py` + 通过率。注：`scripts/check_s1.py` 只是 S1 的临时验证套件，**不是** eval 框架。 |
-| **S8** | ⬜ 未开始（部分） | `cli` 打磨 + `README` + `DECISIONS.md`。注：`DECISIONS.md` 已建（含 1 条取舍），`README.md` 很简、`vibirding/cli.py` 未建。 |
+| **S8** | ⬜ 未开始（部分） | `cli` 打磨 + `README` + `DECISIONS.md`。注：`DECISIONS.md` 已建（含 4 条取舍），`README.md` 很简、`vibirding/cli.py` 未建。 |
 
 ---
 
