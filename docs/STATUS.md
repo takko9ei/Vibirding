@@ -18,7 +18,7 @@
 |---|---|---|
 | **S1** | ✅ done | 离线循环骨架。`vibirding/schemas.py`（5 个数据结构）、`llm/mock.py`（MockClient）、`agent/loop.py`（run_agent_turn）、`agent/prompt.py`、`tools/registry.py`（+Tool 协议/ToolContext）、`tools/log_read.py`（假 read_log）、`harness/{trace,budget,permissions}.py`（trace + 薄版 budget 仅 max_steps + 薄版 permissions read→allow）、`config.py`、`scripts/run_s1.py`（冒烟）、`scripts/check_s1.py`（28 条验证全过）。 |
 | **S2** | ✅ done | 接真模型并产出结构化 Observation。`vibirding/llm/deepseek_client.py`（**DeepSeekClient**，openai SDK，OpenAI 兼容，手动函数调用）为运行时；`llm/client.py`（GeminiClient，google-genai）保留为备用 provider；`config.py` 读 `DEEPSEEK_API_KEY`/base_url/模型名；入口 `scripts/run_deepseek.py`（真模型端到端验证通过，能产出并校验 Observation，含地点纠错）、`scripts/run_s2.py`（Gemini 入口，throwaway，最终会删）。 |
-| **S3（新）** | ⬜ 未开始（已规划） | `range_check` 季节/分布核验适配器（数据源 eBird，范式B：`place+date → 当地当季合理物种清单`）。文档已就位（§7 工具行、§8 数据流回合2、§10 切片表、§3 目录树占位 `tools/range_check.py`），**代码与 eBird 接入都还没做**。 |
+| **S3（新）** | ✅ done | `range_check` 季节/分布核验适配器（数据源 eBird，范式B：`place+date → 当地当季合理物种清单`）。`tools/range_check.py`（Tool 协议，httpx 调 `obs/geo/recent`，10s 超时，去重/中文名/截断；容错：超时/网络/401-403→ok=False，未知地点/空清单→ok=True 降级）、`tools/locations.py`（地名→坐标预存表，8 个常去点 + `resolve_place`）、`config.py`（`load_ebird_api_key` + eBird 常量，俗名用 **`sppLocale=zh_SIM`**）、`agent/prompt.py`（启用 range_check，第4分支从清单挑种）、`scripts/check_s3.py`（离线 19/19 全过）、`scripts/run_s3.py`（端到端：真 DeepSeek+真 eBird 跑通，模型调 range_check 并产出合法 Observation）。三个待解小事已落地（见 §6）。**踩坑修正**：eBird obs 端点俗名语言参数是 `sppLocale` 不是 `locale`（后者被忽略回英文）。 |
 | **S4** | ⬜ 未开始 | `bird_id` 视觉鉴种真适配器（照片 URL → 候选种 + 置信度）。原 S3，现顺延为 S4。 |
 | **S5** | ⬜ 未开始 | `memory/log` 的 append/query + `append_log` 写入 + 完整权限闸（写前审批）。注：薄版 permissions 已在 S1 就位，但写入链路与真审批未做。 |
 | **S6** | ⬜ 未开始（薄版已存在） | 完整 `budget`（token 预算）+ 工具报错容错。注：薄版 budget（仅 max_steps 止捞）已在 S1 就位并锁定签名。 |
@@ -28,20 +28,23 @@
 ---
 
 ## 3. 当前所处切片 / 下一步
-- **现在**：S1、S2 已完成。最近几轮在做**文档与全库一致性巩固**（range_check 升格、运行时迁到 DeepSeek、物种来源优先级裁决规则、去 Gemini 化措辞），不是在写新功能切片。
-- **下一步（推荐）= 开工 S3 `range_check`**：
-  1. 申请/确认 eBird API key 与环境变量；
-  2. 写 `vibirding/tools/range_check.py`（范式B：`range_check(place, date) -> 物种清单`，risk=read，满足 Tool 协议）；
-  3. 注册进 registry、接入循环（与现有 read_log 并存，模型从清单内挑种）；
-  4. 处理三个待解小事（见 §6）；
-  5. 写一个入口/验证脚本跑通。
-- 开工前按铁律：**先在 architecture.md 把 range_check 的契约/形状定死（已大部分就位），再写代码**。
+- **现在**：S1、S2、S3 已完成。S3 端到端验收通过（卡西临海公园→纠正为葛西临海公园→命中坐标表→range_check 真查 eBird→模型清单内挑种→合法 Observation）。
+- **下一步（推荐）= 开工 S4 `bird_id`**（视觉鉴种真适配器，照片 URL → 候选种 + 置信度）：
+  1. **先验证鉴种 API**（有没有公开 API；没有就退回 Merlin/eBird 或托管模型，上层不变）；
+  2. 先在 architecture 把 `bird_id` 契约/形状定死，再写 `tools/bird_id.py`（risk=read，满足 Tool 协议）；
+  3. 接入循环（裁决规则第3条：无种名但有图片 → 以 bird_id 为准，source="bird_id"）；
+  4. 写入口/验证脚本跑通带照片的笔记。
+- 也可考虑先做 S5（写日志 + append_log + 权限闸），让"产出的 Observation 真正落盘"，次序由你定。
 
 ---
 
 ## 4. 与 architecture.md 已对齐的最近重要改动（时间倒序）
 
-0. **docs 入库治理**（本批）
+-1. **S3 `range_check` 实现**（本批，待 commit）
+   - 改了什么：新增 `tools/range_check.py`、`tools/locations.py`、`scripts/{check_s3,run_s3}.py`；改 `config.py`（eBird 常量 + key 加载）、`agent/prompt.py`（启用 range_check + count 抽取微调：量词单只/音近误写如“一直”→count=1）、`requirements.txt`（httpx）、architecture §7（date 语义 + 三小事落地 + sppLocale 纠正）。
+   - 为什么：补"无图仅描述"的权威季节/分布核验短板。**踩坑**：计划写的 `locale=zh` 被 eBird obs 端点忽略（回英文），实测须用 `sppLocale=zh_SIM`（简体）。验收：离线 19/19 + 真 eBird + 端到端均通过。
+
+0. **docs 入库治理**（commit `b800e47`）
    - 改了什么：从 `.gitignore` 移除 `docs/` 与 `CLAUDE.md` 两行；**首次把 `docs/architecture.md`（唯一事实来源）的最新版提交进 git**；校正本 STATUS.md 的 §4/§7/§8。
    - 为什么：`docs/` 自 `b05fed2 "change on gitignore"` 起被忽略、且 architecture.md 当时被 `git rm --cached` 移出跟踪，导致此后所有架构大更新（range_check 升 S3、Gemini→DeepSeek、裁决规则…）**一直没进版本控制**——唯一事实来源只剩工作树一份、随时可能丢；STATUS.md 旧版还误称其“已提交”。
 
@@ -81,27 +84,25 @@
 ---
 
 ## 6. 尚未实现但已规划（待办 + 所在切片）
-- **S3 `range_check` 真正接 eBird**：写适配器（范式B：place+date→当季合理物种清单）、申请 eBird key、接入循环、把 prompt 裁决规则第4条从“仅模型知识推断”升级为真正调 range_check。
-- **S4 视觉鉴种 `bird_id`**：照片 URL → 候选种 + 置信度的真适配器。
-- **range_check 开工时的三个待解小事**：
-  1. **地名 → 坐标**：先用“常去观测点预存坐标表”的方案；
-  2. **eBird 返回名单可能过长**：按近期（`back=N` 天）或按目标科收窄；
-  3. **中/日文鸟名对接**：用 eBird taxonomy 的 `locale` 参数。
+- **S4 视觉鉴种 `bird_id`**：照片 URL → 候选种 + 置信度的真适配器（先验证鉴种 API 是否有公开接口）。
 - **更后面**：S5（memory/log + append_log + 权限闸）、S6（完整 budget + 工具容错）、S7（evals）、S8（cli + README）；§11 进阶：核验子 agent（多 agent，把 bird_id + range_check + read_log 合起来判 flags）、本地模型（OpenAI 兼容端点，`--local`）。
+- **S5 顺带做：运行时日期注入**（已定方案，留到 S5/cli 层统一做）：模型不知道"今天"，date 靠猜（实测把 today 猜成 `2025-06-25`，年份都错）。解法**不是 tool、也不是改 prompt 措辞**，而是在组装 messages 时用 `datetime.now()` 注入运行时日期（与静态 SYSTEM_PROMPT 分开，作一条运行时上下文）；这同时让 prompt 里已写的"obs_date/range_check date 没写就用今天"两条规则真正生效。放 S5 是因为要统一覆盖多个入口脚本 + 未来 cli，避免现在改三处回头又重来。
+- **range_check 的可能改进（非阻塞，待定）**：地名→坐标目前仅 8 点 exact-match，命不中即降级；名单收窄目前只按 `back` 天 + 展示截断（未按目标科）；S7 eval 时观察"清单内挑种"准确度（端到端测试里模型对"黑头红腿小涉禽"选了蛎鹬而非黑翅长脚鹬）。
 
 ---
 
 ## 7. 已知未决 / 需人拍板
-- **DeepSeek 账户额度**：真模型验收时遇到过 `429 RESOURCE_EXHAUSTED`（prepayment credits depleted，预付额度耗尽）和 `503`（过载）。跑真模型前需确认账户有额度。
-- **range_check 何时开工 / 是否现在申请 eBird key**（涉及账号与成本），待定——这是“下一步”的决策点，不属遗留。
-- `scripts/run_s2.py`（Gemini 入口）暂**保留**为备用 provider 的参考入口（本批决定不删）。
+- **DeepSeek 账户额度**：真模型验收时遇到过 `429 RESOURCE_EXHAUSTED`（预付额度耗尽）和 `503`（过载）。用户已表示额度不用担心。
+- **下一切片次序**：S4（bird_id 视觉鉴种）还是 S5（写日志 + append_log + 权限闸）先做，待你拍板（见 §3）。
+- `scripts/run_s2.py`（Gemini 入口）暂**保留**为备用 provider 的参考入口。
 
-> 本批已清掉的旧遗留：①“一致性修订 9 文件尚未 commit”（实为已提交，`911c4ba`/`8a898af`）；②`docs/` 被 gitignore 致 architecture.md 未入库（已从 .gitignore 移除 `docs/` 与 `CLAUDE.md` 并首次提交 architecture.md）。
+> 已清掉的旧遗留：①一致性修订（已提交 `911c4ba`/`8a898af`）；②`docs/` 被 gitignore 致 architecture.md 未入库（已修，commit `b800e47`）；③`EBIRD_API_KEY` 已配置且验证可用（S3）。
 
 ---
 
 ## 8. git 状态
-- **本批（docs 入库治理）**：从 `.gitignore` 移除 `docs/` 与 `CLAUDE.md`；首次提交 `docs/architecture.md`（唯一事实来源，此前一直被忽略、未入库）；校正本 STATUS.md 的 §4/§7/§8。提交后即为新的 HEAD。
-- 之前 HEAD 链：`911c4ba`（全库一致性修订：去 Gemini 化措辞 + 删 `scripts/smoke.py`）→ `8a898af docs: add STATUS.md` → `cad77db fix: prompt`（物种来源优先级）→ `cd8038a add deepseek client` → `08b6ccf add gemini client` → `0e7dbda s1 finished`。
+- **待提交（本批 = S3 实现）**：`tools/range_check.py`、`tools/locations.py`、`scripts/{check_s3,run_s3}.py`（新增）+ `config.py`、`agent/prompt.py`、`requirements.txt`、`docs/architecture.md`(§7)、`docs/STATUS.md`（修改）。待 review 后 commit。
+- **当前 HEAD**：`b800e47`（docs 入库治理：移除 .gitignore 的 docs//CLAUDE.md，首次提交 architecture.md）。
+- 之前 HEAD 链：`911c4ba`（全库一致性修订）→ `8a898af docs: add STATUS.md` → `cad77db fix: prompt` → `cd8038a add deepseek client` → `08b6ccf add gemini client` → `0e7dbda s1 finished`。
 - 注：早先 `git status` 看似 clean，是因为 architecture.md 被 `.gitignore` 屏蔽而**不显示为未跟踪**——这正是它一直漏掉入库的原因，本批已修复。
 - 自此 `docs/` 下文件正常跟踪，新增/改动**不再需要 `git add -f`**。

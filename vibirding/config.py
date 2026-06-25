@@ -25,6 +25,16 @@ DEEPSEEK_BASE_URL = "https://api.deepseek.com"
 MODEL_NAME = "deepseek-v4-flash"  # runtime model used by DeepSeekClient
 TEMPERATURE = 0  # deterministic output — we want stable structured extraction
 
+# --- eBird API (used by the range_check tool) ---
+# A separate service from the runtime model: authoritative season/distribution
+# data, queried over plain HTTP. See tools/range_check.py.
+EBIRD_BASE_URL = "https://api.ebird.org/v2"
+EBIRD_DIST_KM = 25  # search radius around the point, km (eBird max 50)
+EBIRD_BACK_DAYS = 14  # look-back window, days (eBird range 1..30)
+# Sent as the obs endpoint's `sppLocale` param (NOT `locale`, which obs endpoints
+# ignore). "zh_SIM" -> Simplified Chinese common names; "zh" -> Traditional.
+EBIRD_SPP_LOCALE = "zh_SIM"
+
 
 def load_deepseek_api_key() -> str | None:
     """Return DEEPSEEK_API_KEY, loading the project-root .env first.
@@ -36,6 +46,17 @@ def load_deepseek_api_key() -> str | None:
     """
     load_dotenv(ROOT_DIR / ".env")
     return os.environ.get("DEEPSEEK_API_KEY")
+
+
+def load_ebird_api_key() -> str | None:
+    """Return EBIRD_API_KEY, loading the project-root .env first.
+
+    Same loading discipline as load_deepseek_api_key (explicit .env path; a real
+    environment variable still wins). Returns None if absent; the range_check tool
+    decides what to do about that (it reports a clean failure).
+    """
+    load_dotenv(ROOT_DIR / ".env")
+    return os.environ.get("EBIRD_API_KEY")
 
 
 def load_api_key() -> str | None:
