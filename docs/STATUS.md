@@ -87,6 +87,8 @@
 - **S4 视觉鉴种 `bird_id`**：照片 URL → 候选种 + 置信度的真适配器（先验证鉴种 API 是否有公开接口）。
 - **更后面**：S5（memory/log + append_log + 权限闸）、S6（完整 budget + 工具容错）、S7（evals）、S8（cli + README）；§11 进阶：核验子 agent（多 agent，把 bird_id + range_check + read_log 合起来判 flags）、本地模型（OpenAI 兼容端点，`--local`）。
 - **S5 顺带做：运行时日期注入**（已定方案，留到 S5/cli 层统一做）：模型不知道"今天"，date 靠猜（实测把 today 猜成 `2025-06-25`，年份都错）。解法**不是 tool、也不是改 prompt 措辞**，而是在组装 messages 时用 `datetime.now()` 注入运行时日期（与静态 SYSTEM_PROMPT 分开，作一条运行时上下文）；这同时让 prompt 里已写的"obs_date/range_check date 没写就用今天"两条规则真正生效。放 S5 是因为要统一覆盖多个入口脚本 + 未来 cli，避免现在改三处回头又重来。
+- **range_check.run() 未捕获非-httpx 异常 → 留 S6（工具报错容错）给定制文案**：run() 只显式接 httpx 三类异常；若 eBird 返回 200 但 body 非合法 JSON，`resp.json()` 抛 `JSONDecodeError`，run() 不接，落到 [registry.execute](../vibirding/tools/registry.py) 兜底成**通用** `tool error in range_check: …`——**不抛裸栈，但无定制文案**。S6 做完整工具容错时把 `_fetch_recent` 的解码/意外异常纳入 run() 的 try、给定制提示。（登记备注：原话标的是 S5，但按 §2 路线图"工具报错容错"属 S6，故归 S6。）
+- **obs_date 模型猜错年份 → 留 S5（与上条"运行时日期注入"同根同修）**：trace 里模型填 `date=2025-06-25`（应为 2026），根因是模型不知"今天"；S5 注入真实运行时日期后，obs_date / range_check date 一并解决。
 - **range_check 的可能改进（非阻塞，待定）**：地名→坐标目前仅 8 点 exact-match，命不中即降级；名单收窄目前只按 `back` 天 + 展示截断（未按目标科）；S7 eval 时观察"清单内挑种"准确度（端到端测试里模型对"黑头红腿小涉禽"选了蛎鹬而非黑翅长脚鹬）。
 
 ---
