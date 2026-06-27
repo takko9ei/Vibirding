@@ -35,10 +35,13 @@ from pydantic import BaseModel
 
 from .. import config
 from ..schemas import ToolResult
+from .failures import tool_failure
 from .registry import ToolContext
 
 # How many candidate species (per detected target) to show the model.
 _TOP_CANDIDATES = 3
+# Recovery hint shown to the model whenever bird_id can't answer (ok=False).
+_FALLBACK = "改用外形描述推断 + range_check 核验（裁决第4条），必要时给 species 标 low_confidence。"
 
 # Upload error codes -> human-readable reason (architecture/plan-confirmed facts).
 _UPLOAD_ERR = {
@@ -93,14 +96,18 @@ class BirdIdTool:
         # 1. local precheck (cheap; avoids a pointless upload). ok=False on failure.
         err = _check_image(image_path)
         if err is not None:
-            return ToolResult(ok=False, output=err)
+            return ToolResult(ok=False, output=tool_failure("bird_id", err, _FALLBACK))
 
         # 2. need the API key; missing key is a real failure.
         key = config.load_hho_api_key()
         if not key:
             return ToolResult(
                 ok=False,
-                output="HHO_API_KEY 未设置：请在项目根 .env 写入 HHO_API_KEY=<your-key>。",
+                output=tool_failure(
+                    "bird_id",
+                    "HHO_API_KEY 未设置：请在项目根 .env 写入 HHO_API_KEY=<your-key>。",
+                    _FALLBACK,
+                ),
             )
 
         # 3. upload -> poll -> format, normalizing EVERY failure here (no bare stack).
@@ -114,10 +121,11 @@ class BirdIdTool:
         except _Unrecognized as e:
             return ToolResult(ok=True, output=str(e))
         except _HhoError as e:
-            return ToolResult(ok=False, output=str(e))
+            return ToolResult(ok=False, output=tool_failure("bird_id", str(e), _FALLBACK))
         except (KeyError, IndexError, TypeError, ValueError) as e:
             return ToolResult(
-                ok=False, output=f"懂鸟返回结构异常，无法解析候选：{e}"
+                ok=False,
+                output=tool_failure("bird_id", f"懂鸟返回结构异常，无法解析候选：{e}", _FALLBACK),
             )
         return ToolResult(ok=True, output=output)
 

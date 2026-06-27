@@ -25,6 +25,7 @@ from pydantic import BaseModel
 
 from .. import config
 from ..schemas import ToolResult
+from .failures import tool_failure
 from .locations import resolve_place
 from .registry import ToolContext
 
@@ -35,6 +36,8 @@ _HTTP_TIMEOUT = 10.0
 _MAX_RESULTS = 200
 # Cap the species list shown to the model so a long menu doesn't bloat the prompt.
 _MAX_SPECIES_SHOWN = 80
+# Recovery hint shown to the model whenever range_check can't answer (ok=False).
+_FALLBACK = "靠你自身的鸟类学知识判断该种是否合理，并酌情给 species 标 low_confidence。"
 
 
 class RangeCheckInput(BaseModel):
@@ -94,25 +97,41 @@ class RangeCheckTool:
         if not key:
             return ToolResult(
                 ok=False,
-                output="EBIRD_API_KEY 未设置：请在项目根 .env 写入 EBIRD_API_KEY=<your-key>。",
+                output=tool_failure(
+                    "range_check",
+                    "EBIRD_API_KEY 未设置：请在项目根 .env 写入 EBIRD_API_KEY=<your-key>。",
+                    _FALLBACK,
+                ),
             )
 
-        # 3. fetch recent observations, normalizing EVERY failure into ok=False so
-        #    a flaky network never crashes the agent loop.
+        # 3. fetch + format, normalizing EVERY failure into ok=False so a flaky
+        #    network / malformed response never crashes the agent loop. Non-httpx
+        #    errors (200 but bad JSON, odd structure) are caught explicitly HERE
+        #    too — not left to the registry's generic backstop (the S6 debt fix).
         try:
             observations = _fetch_recent(lat, lng, key)
+            output = _format_species(observations, place, date)
         except httpx.TimeoutException:
-            return ToolResult(ok=False, output="eBird 请求超时，未能取回物种清单。")
+            return ToolResult(ok=False, output=tool_failure(
+                "range_check", "eBird 请求超时，未能取回物种清单。", _FALLBACK))
         except httpx.HTTPStatusError as e:
             status = e.response.status_code
             if status in (401, 403):
-                return ToolResult(ok=False, output="eBird API key 无效或无权限（401/403）。")
-            return ToolResult(ok=False, output=f"eBird 返回异常状态码 {status}。")
+                return ToolResult(ok=False, output=tool_failure(
+                    "range_check", "eBird API key 无效或无权限（401/403）。", _FALLBACK))
+            return ToolResult(ok=False, output=tool_failure(
+                "range_check", f"eBird 返回异常状态码 {status}。", _FALLBACK))
         except httpx.RequestError:
-            return ToolResult(ok=False, output="网络连接 eBird 失败。")
+            return ToolResult(ok=False, output=tool_failure(
+                "range_check", "网络连接 eBird 失败。", _FALLBACK))
+        except (ValueError, KeyError, TypeError) as e:
+            # 200 but unparseable JSON / unexpected shape — JSONDecodeError is a
+            # ValueError subclass, so this also covers bad JSON.
+            return ToolResult(ok=False, output=tool_failure(
+                "range_check", f"eBird 返回内容无法解析（坏 JSON 或结构异常）：{e}", _FALLBACK))
 
-        # 4. format the species list (empty list is legitimate -> still ok=True).
-        return ToolResult(ok=True, output=_format_species(observations, place, date))
+        # 4. success: empty list is a legitimate outcome -> still ok=True.
+        return ToolResult(ok=True, output=output)
 
 
 def _fetch_recent(lat: float, lng: float, key: str) -> list[dict]:

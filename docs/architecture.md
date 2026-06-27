@@ -224,7 +224,10 @@ permissions.check(tool_name, risk, input) -> "allow" | "deny"
 ```
 budget.tick() -> bool            # 还能继续吗
 budget.stop_reason() -> str      # "max_steps" | "max_tokens" | None
+budget.observe(usage) -> None    # S6: loop 每次 model_call 后调用，按归一化 usage 累加 token；tick() 据此可返回 "max_tokens"
 ```
+
+> S6 注：token 经 `budget.observe(usage)` 喂入——loop 在每次 model_call 之后加一行 `budget.observe(resp.usage)`（`run_agent_turn` 签名不变）；`tick()` 在下一次调用**前**据累计 token 决定是否停，绝不切断进行中的响应（优雅收尾）。token 口径=Σ(input+output)，多轮重发上下文会重复计入，是有意的保守高估。
 
 **日志（记忆）**
 
@@ -247,6 +250,7 @@ log.query(place=None, species=None, date_range=None) -> list[Observation]
 > **注意**：把乱笔记整理成结构化字段，**不是一个工具**，而是模型自己的本职——它推理后直接把结果填进 `append_log` 的参数里。
 > 另注：`bird_id` 是**鉴种服务的 API**，和运行时大模型（DeepSeek）是两套独立的 API，别混淆。
 > `range_check` 三个小事的落地（S3 已实现）：① 地名→坐标：用"常去观测点预存坐标表"（`tools/locations.py`）；② eBird 名单可能过长：按近期 `back=N` 天取 + 展示截断；③ 中文鸟名：用 obs 端点的 **`sppLocale` 参数**（注意**不是** `locale`——obs 端点会忽略 `locale`），本实现取 `zh_SIM`（简体）。
+> S6 注：工具失败（ok=False）输出统一走 `tools/failures.py` 的 `tool_failure(tool, reason, fallback)`——格式为"⚠ <tool> 暂不可用：<原因>"+回退建议，便于模型识别并按来源优先级回退。仅 `range_check`/`bird_id` 会发**工具级** ok=False；`read_log`/`append_log` 的失败在 registry 级（invalid input / permission denied / tool error）。
 
 ---
 

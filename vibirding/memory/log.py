@@ -52,7 +52,9 @@ class Log:
 
         A missing file is a legitimate "empty log" -> []. Each non-blank line is
         parsed back into an Observation and kept only if it passes every supplied
-        filter (unsupplied filters are ignored).
+        filter (unsupplied filters are ignored). A single corrupt/invalid line is
+        SKIPPED rather than raised — one bad row must never crash the whole query
+        (S6 robustness; full error-tolerance lives in the tool/loop layers).
         """
         if not self.path.exists():
             return []
@@ -62,7 +64,12 @@ class Log:
                 line = line.strip()
                 if not line:
                     continue  # tolerate blank lines
-                obs = Observation.model_validate(json.loads(line))
+                try:
+                    obs = Observation.model_validate(json.loads(line))
+                except (json.JSONDecodeError, ValueError):
+                    # bad JSON or schema-invalid row: skip it (pydantic's
+                    # ValidationError is a ValueError subclass, so it's covered).
+                    continue
                 if _matches(obs, place, species, date_range):
                     results.append(obs)
         return results

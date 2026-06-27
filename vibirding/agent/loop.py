@@ -74,6 +74,10 @@ def run_agent_turn(
                 "text_preview": _preview(resp.text),
             },
         )
+        # S6: feed this call's token usage to the budget. Signature/control flow
+        # are unchanged; tick() (checked before the next call) will stop the loop
+        # if the token cap is now exceeded — never mid-response.
+        budget.observe(resp.usage)
 
         if resp.stop_reason == "tool_use":
             # 1. record the assistant's tool-call turn in the conversation
