@@ -93,6 +93,7 @@
 
 - **S7**：evals（10–15 用例 + 通过率）。eval 时观察“range_check 清单内挑种”准确度（曾见模型对“黑头红腿小涉禽”选蛎鹬而非黑翅长脚鹬）；range_check 名单收窄目前只按 `back` 天 + 展示截断（未按目标科）、坐标表仅 8 点 exact-match——按需在此优化。
 - **S8**：cli 打磨 + README + DECISIONS。
+- **批量笔记（暂定 S9，仅登记、未实现）**：一篇笔记含多条记录、各记录可带各自照片 URL，一次输入 → 整理成多条 Observation。待解点：多次/批量 `append_log` 的权限确认粒度、图文配对、部分失败处理、预算放大、多记录 eval。**依赖 S1–S8 单条主线完整且经 eval 验证后再做**（同登记于 architecture §11）。
 - **§11 进阶（v1 之后）**：核验子 agent（多 agent，把 bird_id + range_check + read_log 合起来判 flags）；本地模型（OpenAI 兼容端点，`--local`）。
 
 ---

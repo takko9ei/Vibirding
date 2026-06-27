@@ -323,6 +323,7 @@ cli 读入笔记 → messages=[{user: 笔记}]
 - **季节/分布核验**：已升为正式切片（新 S3 `range_check`，数据源 eBird），见 §7 / §10——不再属于"可选进阶"。
 - **本地模型**：给 `LLMClient` 再加一个走 OpenAI 兼容端点的实现，接 llama.cpp/vllm，`--local` 开关——因为接口是 provider 中立的，这一步和接 DeepSeek 一样只动 `llm/` 一个文件。**别一开始碰这个**。
 - **大工具结果移出 prompt** / **SQLite 替代 JSONL**：数据量大了再说。
+- **批量笔记（暂定 S9，未实现，仅登记）**：一篇笔记含多条记录、各记录可带各自照片 URL，一次输入 → 整理成多条 Observation。待解点：多次/批量 `append_log` 的权限确认粒度、图文配对、部分失败处理、预算放大、多记录 eval。**依赖 S1–S8 单条主线完整且经 eval 验证后再做。**
 
 ---
 
