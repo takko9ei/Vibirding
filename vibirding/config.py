@@ -19,6 +19,8 @@ ROOT_DIR = PACKAGE_DIR.parent
 # data/ is gitignored: holds the append-only log and the JSONL traces.
 DATA_DIR = ROOT_DIR / "data"
 TRACES_DIR = DATA_DIR / "traces"
+# The append-only observation log written by the append_log tool (memory/log.py).
+OBSERVATIONS_PATH = DATA_DIR / "observations.jsonl"
 
 # --- DeepSeek runtime model (OpenAI-compatible endpoint) ---
 DEEPSEEK_BASE_URL = "https://api.deepseek.com"

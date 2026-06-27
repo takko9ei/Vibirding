@@ -13,7 +13,9 @@ from __future__ import annotations
 
 import inspect
 import json
+import shutil
 import sys
+import tempfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -38,9 +40,12 @@ from vibirding.schemas import (  # noqa: E402
     ToolResult,
     TraceEvent,
 )
+from vibirding.memory.log import Log  # noqa: E402
 from vibirding.tools.log_read import ReadLogTool  # noqa: E402
 from vibirding.tools.registry import ToolContext, ToolRegistry  # noqa: E402
 
+# Throwaway temp dir so read_log tests hit a hermetic file, not real data/.
+_TMP = Path(tempfile.mkdtemp(prefix="vibirding_s1_"))
 _RESULTS: list[tuple[str, str, bool, str]] = []  # (group, name, passed, detail)
 
 
@@ -50,7 +55,7 @@ def check(group: str, name: str, passed: bool, detail: str = "") -> None:
 
 def _reg_readlog() -> ToolRegistry:
     r = ToolRegistry()
-    r.register(ReadLogTool())
+    r.register(ReadLogTool(Log(_TMP / "empty.jsonl")))  # hermetic empty log
     return r
 
 
@@ -195,9 +200,15 @@ check("permissions", "read→allow / write→deny",
       and Permissions().check("append_log", "write", {}) == "deny")
 
 
-# ── H. read_log filtering (fake) ─────────────────────────────────────────────
-reg = _reg_readlog(); ctx = ToolContext(permissions=Permissions())
-hit = reg.execute("read_log", {"place": "卡西临海公园"}, ctx).output
+# ── H. read_log filtering (real log, seeded temp file) ───────────────────────
+seeded = Log(_TMP / "seeded.jsonl")
+seeded.append(Observation(id="h1", timestamp="2025-04-12T00:00:00+00:00",
+                          place="葛西临海公园", obs_date="2025-04-12",
+                          species="黑翅长脚鹬", count=12, raw_note="海边涉禽",
+                          source="inferred"))
+reg = ToolRegistry(); reg.register(ReadLogTool(seeded))
+ctx = ToolContext(permissions=Permissions())
+hit = reg.execute("read_log", {"place": "葛西"}, ctx).output
 miss = reg.execute("read_log", {"place": "火星"}, ctx).output
 check("read_log", "命中地点返回历史观测", "黑翅长脚鹬" in hit)
 check("read_log", "无匹配返回占位文本", "无匹配" in miss)
@@ -249,6 +260,7 @@ def main() -> int:
     # remove this suite's throwaway trace files (keep s1_smoke.jsonl)
     for f in (ROOT / "data" / "traces").glob("chk_*.jsonl"):
         f.unlink()
+    shutil.rmtree(_TMP, ignore_errors=True)  # drop the hermetic temp logs
 
     return 0 if passed == total else 1
 

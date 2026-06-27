@@ -2,15 +2,15 @@
 
 It is a personal-history lookup / weak prior ("have I logged this species here or
 in this season before?"), NOT an authoritative season/range check — authoritative
-seasonality/distribution belongs to a distribution data source (e.g. eBird), see
-architecture section 11.
+seasonality/distribution belongs to range_check (eBird). See architecture sec 7.
 
-S1 ships a FAKE version: it returns a small hardcoded list of sightings and does
-NOT touch any file (the real append-only log + query arrive in S4). It exists so
-the loop has a believable read tool to call. Risk is "read", so it sails through
-the permission gate.
+S5: this now reads the REAL append-only log (memory/log.py Log.query) instead of
+the S1 hardcoded fake list. Its external contract is unchanged — same
+name / description / input_schema / schema / risk="read"; only run() changed (plus
+an injectable Log handle so tests can point at a temp file). risk is "read", so it
+sails through the permission gate.
 
-It satisfies the Tool protocol from tools/registry.py:
+Satisfies the Tool protocol (tools/registry.py):
     name / description / input_schema / schema / risk / run(input, ctx)
 """
 
@@ -18,7 +18,8 @@ from __future__ import annotations
 
 from pydantic import BaseModel
 
-from ..schemas import ToolResult
+from ..memory.log import Log
+from ..schemas import Observation, ToolResult
 from .registry import ToolContext
 
 
@@ -27,19 +28,11 @@ class ReadLogInput(BaseModel):
 
     place: str | None = None
     species: str | None = None
-    date_range: str | None = None  # free-form for now, e.g. "2025-01..2025-12"
-
-
-# A tiny canned "log" standing in for data/observations.jsonl until S4.
-_FAKE_LOG: list[dict] = [
-    {"obs_date": "2025-04-12", "place": "卡西临海公园", "species": "黑翅长脚鹬", "count": 12},
-    {"obs_date": "2025-09-03", "place": "卡西临海公园", "species": "黑翅长脚鹬", "count": 8},
-    {"obs_date": "2025-05-20", "place": "城北湿地", "species": "白鹭", "count": 3},
-]
+    date_range: str | None = None  # free-form, e.g. "2025-01..2025-12"
 
 
 class ReadLogTool:
-    """The fake read_log tool instance registered into the ToolRegistry."""
+    """The read_log tool instance registered into the ToolRegistry."""
 
     name = "read_log"
     description = (
@@ -60,20 +53,27 @@ class ReadLogTool:
     schema = ReadLogInput
     risk = "read"
 
+    def __init__(self, log: Log | None = None) -> None:
+        # Injectable log handle: default = real file; tests pass a temp-path Log.
+        self._log = log or Log()
+
     def run(self, input: dict, ctx: ToolContext) -> ToolResult:
-        # Light filtering over the canned list (substring match) just so the
-        # result reflects the query. Still 100% offline, no file I/O.
-        place = input.get("place")
-        species = input.get("species")
-        rows = [
-            r
-            for r in _FAKE_LOG
-            if (place is None or place in r["place"])
-            and (species is None or species in r["species"])
-        ]
+        # Real read: hand the optional filters to Log.query and format the hits.
+        rows = self._log.query(
+            place=input.get("place"),
+            species=input.get("species"),
+            date_range=input.get("date_range"),
+        )
         if not rows:
             return ToolResult(ok=True, output="（无匹配的历史观测记录）")
-        lines = [
-            f"{r['obs_date']} {r['place']} {r['species']} ×{r['count']}" for r in rows
-        ]
+        lines = [_format_row(o) for o in rows]
         return ToolResult(ok=True, output="历史观测：\n" + "\n".join(lines))
+
+
+def _format_row(o: Observation) -> str:
+    """One observation -> one human-readable line (None-safe; pure function)."""
+    date = o.obs_date or "?"
+    place = o.place or "?"
+    species = o.species or "?"
+    count = f"×{o.count}" if o.count is not None else "×?"
+    return f"{date} {place} {species} {count}"
