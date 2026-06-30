@@ -39,7 +39,7 @@ from vibirding.llm.deepseek_client import DeepSeekClient, DeepSeekError  # noqa:
 from vibirding.schemas import Observation  # noqa: E402
 from vibirding.tools.log_read import ReadLogTool  # noqa: E402
 from vibirding.tools.range_check import RangeCheckTool  # noqa: E402
-from vibirding.tools.registry import ToolRegistry  # noqa: E402
+from vibirding.tools.registry import ToolManager  # noqa: E402
 
 DEFAULT_NOTE = (
     "今天上午在水元公园看到一直灰色、大型的涉禽，嘴巴很长，脖子很长，头部有深蓝色的条带"
@@ -63,7 +63,7 @@ def main() -> int:
     note = sys.argv[1] if len(sys.argv) > 1 else DEFAULT_NOTE
 
     # ---- wiring: like run_deepseek.py, plus the range_check tool ----
-    registry = ToolRegistry()
+    registry = ToolManager()
     registry.register(ReadLogTool())
     registry.register(RangeCheckTool())
     trace = TraceWriter(run_id=f"s3_{datetime.now():%Y%m%d_%H%M%S}")

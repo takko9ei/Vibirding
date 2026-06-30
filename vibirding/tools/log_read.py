@@ -32,7 +32,7 @@ class ReadLogInput(BaseModel):
 
 
 class ReadLogTool:
-    """The read_log tool instance registered into the ToolRegistry."""
+    """The read_log tool instance registered into the ToolManager."""
 
     name = "read_log"
     description = (

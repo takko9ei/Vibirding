@@ -68,7 +68,7 @@ class BirdIdInput(BaseModel):
 
 
 class BirdIdTool:
-    """The bird_id tool instance registered into the ToolRegistry."""
+    """The bird_id tool instance registered into the ToolManager."""
 
     name = "bird_id"
     description = (

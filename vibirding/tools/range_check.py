@@ -48,7 +48,7 @@ class RangeCheckInput(BaseModel):
 
 
 class RangeCheckTool:
-    """The range_check tool instance registered into the ToolRegistry."""
+    """The range_check tool instance registered into the ToolManager."""
 
     name = "range_check"
     description = (

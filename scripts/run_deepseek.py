@@ -35,7 +35,7 @@ from vibirding.harness.trace import TraceWriter  # noqa: E402
 from vibirding.llm.deepseek_client import DeepSeekClient, DeepSeekError  # noqa: E402
 from vibirding.schemas import Observation  # noqa: E402
 from vibirding.tools.log_read import ReadLogTool  # noqa: E402
-from vibirding.tools.registry import ToolRegistry  # noqa: E402
+from vibirding.tools.registry import ToolManager  # noqa: E402
 
 DEFAULT_NOTE = (
     "今天黄昏在卡西临海公园，看到二十来只黑色脑袋、红色长腿的小涉禽，"
@@ -60,7 +60,7 @@ def main() -> int:
     note = sys.argv[1] if len(sys.argv) > 1 else DEFAULT_NOTE
 
     # ---- wiring: IDENTICAL to run_s2.py except for the client ----
-    registry = ToolRegistry()
+    registry = ToolManager()
     registry.register(ReadLogTool())
     trace = TraceWriter(run_id=f"deepseek_{datetime.now():%Y%m%d_%H%M%S}")
     # max_steps == max number of real model calls this turn (one per loop step).

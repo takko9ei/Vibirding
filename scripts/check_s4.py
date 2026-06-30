@@ -44,7 +44,7 @@ from vibirding.tools.bird_id import (  # noqa: E402
     _format_candidates,
     _parse_array,
 )
-from vibirding.tools.registry import Tool, ToolContext, ToolRegistry  # noqa: E402
+from vibirding.tools.registry import Tool, ToolContext, ToolManager  # noqa: E402
 
 
 # --- offline guarantee + no real sleeping ---
@@ -220,7 +220,7 @@ check("nonet", "文件不存在 → ok=False", (not r.ok) and "不存在" in r.o
 
 
 # ── G. registry wiring ───────────────────────────────────────────────────────
-reg = ToolRegistry()
+reg = ToolManager()
 reg.register(tool)
 res = reg.execute("bird_id", {}, _CTX)  # missing required image_path
 check("registry", "缺 image_path → 'invalid input'", (not res.ok) and "invalid input" in res.output, res.output[:40])

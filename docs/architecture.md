@@ -67,7 +67,7 @@ Vibirding/
 │   │   ├── loop.py              # run_agent_turn()：手动循环+预算+容错
 │   │   └── prompt.py            # system prompt
 │   ├── tools/
-│   │   ├── registry.py          # ToolRegistry：注册/校验/执行/归一化
+│   │   ├── registry.py          # ToolManager：注册/校验/执行/归一化
 │   │   ├── bird_id.py           # 鉴种 API 适配器（可替换）
 │   │   ├── range_check.py       # ★季节/分布核验适配器（eBird）
 │   │   ├── log_read.py          # read_log 工具（只读）
@@ -152,14 +152,14 @@ detail: dict       # tool 名、input 预览、output 预览、stop_reason、usa
 
 ## 5. 模块职责 + 对应 MiniCode 模式
 
-| 模块                            | 职责                                                            | 对应 MiniCode                                                                                                                            |
-| ------------------------------- | --------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
-| `agent/loop.py`                 | `model→tool→model` 回合循环；步数上限；工具报错计数；空响应重试 | `src/agent-loop.ts`                                                                                                                      |
-| `tools/registry.py`             | 统一工具契约：find → 校验 → 执行 → `{ok,output}`                | `src/tool.ts`                                                                                                                            |
-| `harness/permissions.py`        | 写入类工具执行前审批；记住"本回合一直允许"                      | `src/permissions.ts`                                                                                                                     |
-| `memory/log.py`                 | append-only JSONL 观测日志                                      | `src/session.ts`                                                                                                                         |
-| `harness/trace.py`              | 结构化轨迹                                                      | （MiniCode 散在 TUI；你独立成模块更清晰）                                                                                                |
-| `harness/budget.py`             | 预算与停止条件                                                  | `agent-loop.ts` 里的 `maxSteps`                                                                                                          |
+| 模块                                     | 职责                                                            | 对应 MiniCode                                                                                                                                           |
+| ---------------------------------------- | --------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `agent/loop.py`                          | `model→tool→model` 回合循环；步数上限；工具报错计数；空响应重试 | `src/agent-loop.ts`                                                                                                                                     |
+| `tools/registry.py`                      | 统一工具契约：find → 校验 → 执行 → `{ok,output}`                | `src/tool.ts`                                                                                                                                           |
+| `harness/permissions.py`                 | 写入类工具执行前审批；记住"本回合一直允许"                      | `src/permissions.ts`                                                                                                                                    |
+| `memory/log.py`                          | append-only JSONL 观测日志                                      | `src/session.ts`                                                                                                                                        |
+| `harness/trace.py`                       | 结构化轨迹                                                      | （MiniCode 散在 TUI；你独立成模块更清晰）                                                                                                               |
+| `harness/budget.py`                      | 预算与停止条件                                                  | `agent-loop.ts` 里的 `maxSteps`                                                                                                                         |
 | `llm/deepseek_client.py` + `llm/mock.py` | 模型适配（实现为 **DeepSeekClient**，走 openai SDK）+ 离线 mock | MiniCode 对应 `src/anthropic-adapter.ts` + `src/mock-model.ts`（注：那是 MiniCode 用 Anthropic 的文件名；我们这边换成 DeepSeek，OpenAI 兼容，结构同构） |
 
 ---
@@ -193,7 +193,7 @@ run(input, ctx) -> ToolResult
 **工具注册表**
 
 ```
-ToolRegistry.execute(name, input, ctx) -> ToolResult
+ToolManager.execute(name, input, ctx) -> ToolResult
 # 内部顺序：find(name) → schema 校验 → 若 risk=="write" 过 permissions → run() → try/except 归一化
 ```
 
@@ -240,12 +240,12 @@ log.query(place=None, species=None, date_range=None) -> list[Observation]
 
 ## 7. 工具清单（v1）
 
-| 工具         | risk      | 作用                         | 备注                                                                                               |
-| ------------ | --------- | ---------------------------- | -------------------------------------------------------------------------------------------------- |
-| `bird_id`    | read      | **本地图片路径** `image_path` → 候选鸟种 + 置信度（中文名） | **懂鸟(hholove)实现**（S4）：**异步两步**——先上传图片拿识别ID、再用ID轮询取结果；上传须**长超时**（海外 `WriteTimeout` 坑：`connect=10,read=60,write=60,pool=10`），取结果 `timeout=30`、轮询≤5次。鉴权头 `api_key`，所有请求 POST `/dongniao` 走 multipart。**返回是数组 `[code, payload]`**（非字典）：上传 `1000`→payload 是识别ID，取结果 `1000`→payload 是检测目标数组、`1001`→未算完重试、`1008/1009`→未认出。置信度 0~100；物种名 `中文名\|英文名\|拉丁名` 取首段。**异步复杂度全封装在 `run()` 内**，对外只回一个 ToolResult；入参是本地 `image_path`（**非 URL**）。 |
-| `read_log`   | read      | 查**你自己的**历史观测（按地点/种/日期） | 用于"我去年在这儿见过啥""这地方我记录过哪些种"——只是个人历史/**弱先验**，不做权威的季节/分布核验（那归 `range_check`，见 §7 / 新 S3） |
-| `range_check` | read | place + date → 该地当季合理出现的**物种清单**（数据源 eBird） | 季节/分布核验的**正主**；模型从清单里挑与外形描述匹配的种。与 `read_log` 区别：range_check 是**权威**物候/分布数据，read_log 只是**个人历史/弱先验**。**注：`date` 仅作季节提示——实际查询走 eBird `recent`（近 `back` 天、≤30 天、截至今天）作"当季"代理，吃不了任意历史日期；笔记记的是当天/近期时该代理成立。** |
-| `append_log` | **write** | 写入一条 Observation         | **唯一需要过权限闸的工具**                                                                         |
+| 工具          | risk      | 作用                                                          | 备注                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| ------------- | --------- | ------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `bird_id`     | read      | **本地图片路径** `image_path` → 候选鸟种 + 置信度（中文名）   | **懂鸟(hholove)实现**（S4）：**异步两步**——先上传图片拿识别ID、再用ID轮询取结果；上传须**长超时**（海外 `WriteTimeout` 坑：`connect=10,read=60,write=60,pool=10`），取结果 `timeout=30`、轮询≤5次。鉴权头 `api_key`，所有请求 POST `/dongniao` 走 multipart。**返回是数组 `[code, payload]`**（非字典）：上传 `1000`→payload 是识别ID，取结果 `1000`→payload 是检测目标数组、`1001`→未算完重试、`1008/1009`→未认出。置信度 0~100；物种名 `中文名\|英文名\|拉丁名` 取首段。**异步复杂度全封装在 `run()` 内**，对外只回一个 ToolResult；入参是本地 `image_path`（**非 URL**）。 |
+| `read_log`    | read      | 查**你自己的**历史观测（按地点/种/日期）                      | 用于"我去年在这儿见过啥""这地方我记录过哪些种"——只是个人历史/**弱先验**，不做权威的季节/分布核验（那归 `range_check`，见 §7 / 新 S3）                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| `range_check` | read      | place + date → 该地当季合理出现的**物种清单**（数据源 eBird） | 季节/分布核验的**正主**；模型从清单里挑与外形描述匹配的种。与 `read_log` 区别：range_check 是**权威**物候/分布数据，read_log 只是**个人历史/弱先验**。**注：`date` 仅作季节提示——实际查询走 eBird `recent`（近 `back` 天、≤30 天、截至今天）作"当季"代理，吃不了任意历史日期；笔记记的是当天/近期时该代理成立。**                                                                                                                                                                                                                                                             |
+| `append_log`  | **write** | 写入一条 Observation                                          | **唯一需要过权限闸的工具**                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
 
 > **注意**：把乱笔记整理成结构化字段，**不是一个工具**，而是模型自己的本职——它推理后直接把结果填进 `append_log` 的参数里。
 > 另注：`bird_id` 是**鉴种服务的 API**，和运行时大模型（DeepSeek）是两套独立的 API，别混淆。
@@ -302,16 +302,16 @@ cli 读入笔记 → messages=[{user: 笔记}]
 
 ## 10. 推荐搭建顺序（每个切片都能跑）
 
-| 切片 | 内容                                                                         | 验收                                       |
-| ---- | ---------------------------------------------------------------------------- | ------------------------------------------ |
-| S1   | `schemas` + `MockClient` + `loop` + `registry` + 假 `read_log` + `trace` + 薄版 `budget`(仅 max_steps) + 薄版 `permissions`(read→allow) + `scripts/run_s1.py`；S1 锁定 loop 签名，权限/预算完整逻辑在 S5/S6 填充 | 离线、零成本，循环能跑通，trace 打印出每步 |
-| S2   | `DeepSeekClient`(openai/OpenAI 兼容) 接真模型，能产出结构化 `Observation`     | 真模型跑通一条笔记                         |
-| S3   | `range_check` 适配器（eBird，纯文本+HTTP）：place+date → 当地当季合理物种清单；补"无图仅描述"识别短板 | 给定 place+date 能取回当季合理物种清单，模型能在清单内选种 |
-| S4   | `bird_id` 真适配器（先验证鉴种 API）                                         | 带照片能拿到候选种                         |
-| S5   | `memory/log` 的 append/query + `append_log` 写入 + 权限闸                    | 能写日志、写前要确认、能查回来             |
-| S6   | `budget` 步数上限 + 工具报错容错                                             | 死循环/报错不会失控                        |
-| S7   | `evals`：10–15 条用例 + 通过率                                               | 一条命令出通过率                           |
-| S8   | `cli` 打磨 + `README` + `DECISIONS.md`                                       | 别人能 clone 跑起来                        |
+| 切片 | 内容                                                                                                                                                                                                             | 验收                                                       |
+| ---- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------- |
+| S1   | `schemas` + `MockClient` + `loop` + `registry` + 假 `read_log` + `trace` + 薄版 `budget`(仅 max_steps) + 薄版 `permissions`(read→allow) + `scripts/run_s1.py`；S1 锁定 loop 签名，权限/预算完整逻辑在 S5/S6 填充 | 离线、零成本，循环能跑通，trace 打印出每步                 |
+| S2   | `DeepSeekClient`(openai/OpenAI 兼容) 接真模型，能产出结构化 `Observation`                                                                                                                                        | 真模型跑通一条笔记                                         |
+| S3   | `range_check` 适配器（eBird，纯文本+HTTP）：place+date → 当地当季合理物种清单；补"无图仅描述"识别短板                                                                                                            | 给定 place+date 能取回当季合理物种清单，模型能在清单内选种 |
+| S4   | `bird_id` 真适配器（先验证鉴种 API）                                                                                                                                                                             | 带照片能拿到候选种                                         |
+| S5   | `memory/log` 的 append/query + `append_log` 写入 + 权限闸                                                                                                                                                        | 能写日志、写前要确认、能查回来                             |
+| S6   | `budget` 步数上限 + 工具报错容错                                                                                                                                                                                 | 死循环/报错不会失控                                        |
+| S7   | `evals`：10–15 条用例 + 通过率                                                                                                                                                                                   | 一条命令出通过率                                           |
+| S8   | `cli` 打磨 + `README` + `DECISIONS.md`                                                                                                                                                                           | 别人能 clone 跑起来                                        |
 
 > S1 用 MockClient 把循环逻辑和真模型解耦，是整条路最省钱、最好 debug 的起点。**先把脑子（循环）调通，再接嘴（DeepSeek）和手（鉴种 API）。**
 

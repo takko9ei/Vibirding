@@ -46,7 +46,7 @@ from vibirding.tools import bird_id as bid  # noqa: E402
 from vibirding.tools.bird_id import BirdIdTool  # noqa: E402
 from vibirding.tools.log_read import ReadLogTool  # noqa: E402
 from vibirding.tools.range_check import RangeCheckTool  # noqa: E402
-from vibirding.tools.registry import ToolContext, ToolRegistry  # noqa: E402
+from vibirding.tools.registry import ToolContext, ToolManager  # noqa: E402
 
 
 # ── offline guards + fake keys (suite is throwaway; no need to restore) ───────
@@ -118,7 +118,7 @@ def _scripted(responses):
 
 def _safe_loop(script, budget):
     """Drive run_agent_turn with a scripted model; return (events, final, error)."""
-    reg = ToolRegistry()
+    reg = ToolManager()
     reg.register(ReadLogTool(Log(_new_path())))  # hermetic empty log; read always ok
     trace = TraceWriter(run_id=f"s6_{_N}", traces_dir=_BASE, to_console=False)
     ev: list = []
@@ -182,7 +182,7 @@ check("loop-tokens", "stop_reason == max_tokens",
 def _run_range(get_stub, place="葛西临海公园"):
     httpx.get = get_stub
     try:
-        reg = ToolRegistry(); reg.register(RangeCheckTool())
+        reg = ToolManager(); reg.register(RangeCheckTool())
         return reg.execute("range_check", {"place": place, "date": "2026-06-27"}, _CTX)
     finally:
         httpx.get = _no_net
@@ -223,7 +223,7 @@ check("log", "坏行跳过，仍取回 2 条好记录",
 def _run_bird(post_responses):
     httpx.post = _scripted(post_responses)
     try:
-        reg = ToolRegistry(); reg.register(BirdIdTool())
+        reg = ToolManager(); reg.register(BirdIdTool())
         return reg.execute("bird_id", {"image_path": IMG}, _CTX)
     finally:
         httpx.post = _no_net

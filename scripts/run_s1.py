@@ -36,7 +36,7 @@ from vibirding.harness.trace import TraceWriter  # noqa: E402
 from vibirding.llm.mock import MockClient  # noqa: E402
 from vibirding.schemas import ModelResponse, ToolCall  # noqa: E402
 from vibirding.tools.log_read import ReadLogTool  # noqa: E402
-from vibirding.tools.registry import ToolRegistry  # noqa: E402
+from vibirding.tools.registry import ToolManager  # noqa: E402
 
 
 def main() -> int:
@@ -66,7 +66,7 @@ def main() -> int:
         ),
     ]
 
-    registry = ToolRegistry()
+    registry = ToolManager()
     registry.register(ReadLogTool())
 
     trace = TraceWriter(run_id="s1_smoke")

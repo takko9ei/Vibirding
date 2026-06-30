@@ -1,4 +1,4 @@
-"""ToolRegistry — the single, uniform tool contract.
+"""ToolManager — the single, uniform tool contract.
 
 Every tool, regardless of what it does, is registered here and goes through one
 pipeline on execution:
@@ -46,7 +46,7 @@ class Tool(Protocol):
     def run(self, input: dict, ctx: ToolContext) -> ToolResult: ...
 
 
-class ToolRegistry:
+class ToolManager:
     """Holds tools by name; produces the model-facing menu; executes them."""
 
     def __init__(self) -> None:

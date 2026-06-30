@@ -42,7 +42,7 @@ from vibirding.schemas import (  # noqa: E402
 )
 from vibirding.memory.log import Log  # noqa: E402
 from vibirding.tools.log_read import ReadLogTool  # noqa: E402
-from vibirding.tools.registry import ToolContext, ToolRegistry  # noqa: E402
+from vibirding.tools.registry import ToolContext, ToolManager  # noqa: E402
 
 # Throwaway temp dir so read_log tests hit a hermetic file, not real data/.
 _TMP = Path(tempfile.mkdtemp(prefix="vibirding_s1_"))
@@ -53,8 +53,8 @@ def check(group: str, name: str, passed: bool, detail: str = "") -> None:
     _RESULTS.append((group, name, bool(passed), detail))
 
 
-def _reg_readlog() -> ToolRegistry:
-    r = ToolRegistry()
+def _reg_readlog() -> ToolManager:
+    r = ToolManager()
     r.register(ReadLogTool(Log(_TMP / "empty.jsonl")))  # hermetic empty log
     return r
 
@@ -154,7 +154,7 @@ class BoomTool:
         raise ValueError("kaboom")
 
 
-reg = ToolRegistry(); reg.register(BoomTool())
+reg = ToolManager(); reg.register(BoomTool())
 res = reg.execute("boom", {}, ToolContext(permissions=Permissions()))
 check("tool-error", "异常归一化为 ok=False", res.ok is False, res.output)
 check("tool-error", "错误信息含工具名 boom", "boom" in res.output)
@@ -190,7 +190,7 @@ class WriteTool:
         return ToolResult(ok=True, output="WROTE (must NOT happen in S1)")
 
 
-reg = ToolRegistry(); reg.register(WriteTool())
+reg = ToolManager(); reg.register(WriteTool())
 res = reg.execute("fake_write", {"x": 1}, ToolContext(permissions=Permissions()))
 check("permissions", "写操作被拒 (fail-closed)",
       res.ok is False and "permission denied" in res.output, res.output)
@@ -206,7 +206,7 @@ seeded.append(Observation(id="h1", timestamp="2025-04-12T00:00:00+00:00",
                           place="葛西临海公园", obs_date="2025-04-12",
                           species="黑翅长脚鹬", count=12, raw_note="海边涉禽",
                           source="inferred"))
-reg = ToolRegistry(); reg.register(ReadLogTool(seeded))
+reg = ToolManager(); reg.register(ReadLogTool(seeded))
 ctx = ToolContext(permissions=Permissions())
 hit = reg.execute("read_log", {"place": "葛西"}, ctx).output
 miss = reg.execute("read_log", {"place": "火星"}, ctx).output

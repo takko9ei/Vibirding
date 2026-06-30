@@ -42,7 +42,7 @@ from vibirding.schemas import Observation  # noqa: E402
 from vibirding.tools.bird_id import BirdIdTool  # noqa: E402
 from vibirding.tools.log_read import ReadLogTool  # noqa: E402
 from vibirding.tools.range_check import RangeCheckTool  # noqa: E402
-from vibirding.tools.registry import ToolRegistry  # noqa: E402
+from vibirding.tools.registry import ToolManager  # noqa: E402
 
 # The folder holding <stem>.jpg paired with <stem>_discribe.txt notes.
 TESTIMGS_DIR = Path(r"C:\Users\Takko\Desktop\testimgs")
@@ -91,7 +91,7 @@ def main() -> int:
     user_content = f"{note}\n（附图，本地路径：{image_path}）"
 
     # ---- wiring: all three read tools registered ----
-    registry = ToolRegistry()
+    registry = ToolManager()
     registry.register(ReadLogTool())
     registry.register(RangeCheckTool())
     registry.register(BirdIdTool())

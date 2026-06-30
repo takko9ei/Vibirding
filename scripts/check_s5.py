@@ -31,7 +31,7 @@ from vibirding.memory.log import Log  # noqa: E402
 from vibirding.schemas import Observation  # noqa: E402
 from vibirding.tools.log_read import ReadLogTool  # noqa: E402
 from vibirding.tools.log_write import AppendLogTool  # noqa: E402
-from vibirding.tools.registry import Tool, ToolContext, ToolRegistry  # noqa: E402
+from vibirding.tools.registry import Tool, ToolContext, ToolManager  # noqa: E402
 
 _RESULTS: list[tuple[str, str, bool, str]] = []
 _BASE = Path(tempfile.mkdtemp(prefix="vibirding_s5_"))  # one throwaway dir per run
@@ -134,7 +134,7 @@ check("autocreate", "append 后文件已建", nested.path.exists())
 
 # ── E. append_log via registry (allow) + machine fields filled ───────────────
 log = Log(_new_path())
-reg = ToolRegistry()
+reg = ToolManager()
 reg.register(AppendLogTool(log))
 ctx_allow = ToolContext(permissions=Permissions(approver=_allow))
 res = reg.execute("append_log", _inp(species="戴胜"), ctx_allow)
@@ -148,7 +148,7 @@ check("append_log", "model 字段写对 (species=戴胜)", back.species == "戴�
 
 # ── F. permission DENY path (registry write→permissions branch fires) ────────
 log = Log(_new_path())
-reg = ToolRegistry()
+reg = ToolManager()
 reg.register(AppendLogTool(log))
 ctx_deny = ToolContext(permissions=Permissions(approver=_deny))
 res = reg.execute("append_log", _inp(), ctx_deny)
@@ -159,7 +159,7 @@ check("deny", "拒绝后未写盘 (0 行)", _lines(log.path) == 0, str(_lines(lo
 
 # ── G. permission ALWAYS (本回合一直允许，只问一次) ──────────────────────────
 log = Log(_new_path())
-reg = ToolRegistry()
+reg = ToolManager()
 reg.register(AppendLogTool(log))
 _calls = {"n": 0}
 
@@ -194,7 +194,7 @@ check("read_log", "无匹配 → 占位文本", miss.ok and "无匹配" in miss.
 
 
 # ── J. input validation via registry ─────────────────────────────────────────
-reg = ToolRegistry()
+reg = ToolManager()
 reg.register(AppendLogTool(Log(_new_path())))
 res = reg.execute("append_log", {}, ctx_allow)  # missing required raw_note+source
 check("validate", "缺 raw_note/source → 'invalid input'",

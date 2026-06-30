@@ -46,7 +46,7 @@ class AppendLogInput(BaseModel):
 
 
 class AppendLogTool:
-    """The append_log tool instance registered into the ToolRegistry."""
+    """The append_log tool instance registered into the ToolManager."""
 
     name = "append_log"
     description = (

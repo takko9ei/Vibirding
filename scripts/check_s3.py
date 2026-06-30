@@ -39,7 +39,7 @@ from vibirding.tools.range_check import (  # noqa: E402
     RangeCheckTool,
     _format_species,
 )
-from vibirding.tools.registry import Tool, ToolContext, ToolRegistry  # noqa: E402
+from vibirding.tools.registry import Tool, ToolContext, ToolManager  # noqa: E402
 
 
 # --- offline guarantee: any real HTTP call must fail loudly ---
@@ -102,7 +102,7 @@ check("format", "截断后展示数 == 上限",
 
 
 # ── D. run() pre-network branches (no network reached) ───────────────────────
-reg = ToolRegistry()
+reg = ToolManager()
 reg.register(tool)
 
 # unknown place -> graceful degrade, ok=True (NOT an error)

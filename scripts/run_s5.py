@@ -42,7 +42,7 @@ from vibirding.tools.bird_id import BirdIdTool  # noqa: E402
 from vibirding.tools.log_read import ReadLogTool  # noqa: E402
 from vibirding.tools.log_write import AppendLogTool  # noqa: E402
 from vibirding.tools.range_check import RangeCheckTool  # noqa: E402
-from vibirding.tools.registry import ToolRegistry  # noqa: E402
+from vibirding.tools.registry import ToolManager  # noqa: E402
 
 # A note that names the species + place, so the write path is the focus (the model
 # may still call range_check to sanity-check). Override via argv.
@@ -108,7 +108,7 @@ def main() -> int:
     log = Log()  # the REAL data/observations.jsonl
 
     # ---- wiring: all four tools; read tools + the one write tool ----
-    registry = ToolRegistry()
+    registry = ToolManager()
     registry.register(ReadLogTool(log))
     registry.register(RangeCheckTool())
     registry.register(BirdIdTool())

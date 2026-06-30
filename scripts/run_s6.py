@@ -42,7 +42,7 @@ from vibirding.tools.bird_id import BirdIdTool  # noqa: E402
 from vibirding.tools.log_read import ReadLogTool  # noqa: E402
 from vibirding.tools.log_write import AppendLogTool  # noqa: E402
 from vibirding.tools.range_check import RangeCheckTool  # noqa: E402
-from vibirding.tools.registry import ToolRegistry  # noqa: E402
+from vibirding.tools.registry import ToolManager  # noqa: E402
 
 # A note with NO date on purpose, so today_hint() is what supplies obs_date.
 DEFAULT_NOTE = "上午在葛西临海公园，看到大约15只黑翅长脚鹬在浅滩觅食。"
@@ -73,7 +73,7 @@ def main() -> int:
         print("（--break-ebird：eBird key 改为 bogus，range_check 将失败以演示优雅回退）")
 
     log = Log()  # the real data/observations.jsonl
-    registry = ToolRegistry()
+    registry = ToolManager()
     registry.register(ReadLogTool(log))
     registry.register(RangeCheckTool())
     registry.register(BirdIdTool())

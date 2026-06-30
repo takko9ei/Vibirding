@@ -12,7 +12,7 @@ value — the loop never sees the provider's raw shapes (the client handles that
 Contract (architecture section 6, signature locked from S1):
     run_agent_turn(messages, tools, llm, permissions, budget, trace, on_event=...)
         -> (final_messages, final_text)
-    # `tools` is the ToolRegistry: it both produces the model menu (specs())
+    # `tools` is the ToolManager: it both produces the model menu (specs())
     #  and executes calls (execute()).
 """
 
@@ -34,7 +34,7 @@ def _preview(text: str | None, limit: int = 120) -> str:
 
 def run_agent_turn(
     messages: list[dict],
-    tools,  # ToolRegistry — see module docstring
+    tools,  # ToolManager — see module docstring
     llm,  # LLMClient (MockClient offline; DeepSeekClient/GeminiClient for real models)
     permissions,
     budget,
