@@ -2,7 +2,7 @@
 
 > 本文件是“当前进度快照”，给冷启动（无上下文）的人快速对齐用。
 > **唯一事实来源仍是 [docs/architecture.md](architecture.md)**；本文若与 architecture 冲突，以 architecture 为准。
-> 最后更新：S6（budget 上限 + 工具报错容错 + 日期注入）已提交、S9（批量笔记）已登记之后；HEAD = `bb49219`，工作树干净。
+> 最后更新：S6 完成 + S9 登记 + 上一份完整快照（`df55da9`）提交之后的一次代码库复核——自上次快照起**代码零改动**，五套离线自检全绿（s1 28 / s3 19 / s4 30 / s5 31 / s6 24 = 132/132）。HEAD = `df55da9`，工作树干净。
 
 ---
 
@@ -101,7 +101,7 @@
 ---
 
 ## 8. git 状态
-- **最近一次 commit（HEAD）**：`bb49219 chore: docs optimize`（= S9 批量笔记登记，改 architecture §11 + STATUS §6）。
-- **未提交的改动**：本次盘点写完后，仅 `docs/STATUS.md` 一个文件——确认无误即 commit。
-- 切片提交链（新→旧）：S9登记 `bb49219` → S6 `15b51d3` → S5 `68d713e` → S4 `8a74898`（+ 文档 `fdbda66`）→ S3 `bd04472`+`69a67f8` → docs 入库治理 `b800e47` → `cad77db fix: prompt` → `cd8038a add deepseek` → `08b6ccf add gemini` → `0e7dbda s1 finished`。
+- **最近一次 commit（HEAD）**：`df55da9 docs: full status snapshot before context reset`（上一份完整快照）；其前依次为 `bb49219`(S9登记) / `15b51d3`(S6) / `68d713e`(S5)。
+- **未提交的改动**：本次复核写完后，仅 `docs/STATUS.md` 一个文件（刷新本节 + 顶部“最后更新”）——确认无误即 commit；其余代码自 `df55da9` 起无任何改动，工作树此前干净。
+- 切片提交链（新→旧）：快照 `df55da9` → S9登记 `bb49219` → S6 `15b51d3` → S5 `68d713e` → S4 `8a74898`（+ 文档 `fdbda66`）→ S3 `bd04472`+`69a67f8` → docs 入库治理 `b800e47` → `cad77db fix: prompt` → `cd8038a add deepseek` → `08b6ccf add gemini` → `0e7dbda s1 finished`。
 - `docs/` 已正常跟踪，改动**不再需要 `git add -f`**。
