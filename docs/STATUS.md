@@ -2,7 +2,7 @@
 
 > 本文件是“当前进度快照”，给冷启动（无上下文）的人快速对齐用。
 > **唯一事实来源仍是 [docs/architecture.md](architecture.md)**；本文若与 architecture 冲突，以 architecture 为准。
-> 最后更新：S1–S6 完成、S9 已登记、`ToolManager` 改名 + 日期注入补齐 + S7 跑法决策 + 文档一致性同步全部提交之后。HEAD = `b071589`，工作树干净；五套离线自检 **132/132 全绿**（s1 28 / s3 19 / s4 30 / s5 31 / s6 24）。
+> 最后更新：S1–S6 完成、S9 已登记、`ToolManager` 改名 + 日期注入补齐 + S7 跑法决策 + 文档一致性同步全部提交之后，再叠加本轮 `photo_url → image_path` 术语统一。HEAD = `11b9fe0`，工作树干净；五套离线自检 **132/132 全绿**（s1 28 / s3 19 / s4 30 / s5 31 / s6 24）。
 
 ---
 
@@ -24,22 +24,26 @@
 | **S6** | ✅ done | **纯鲁棒性：budget 完整化 + 工具报错容错 + 日期注入**。`harness/budget.py`（+`observe`/`max_tokens`，token 触顶→`stop_reason="max_tokens"`；`tick`/`stop_reason` 签名不变；`max_tokens=None` 向后兼容）、`agent/loop.py`（**仅加一行** `budget.observe(resp.usage)`，签名/控制流不变）、`tools/failures.py`（`tool_failure` 统一失败文案 “⚠ <tool> 暂不可用：…”）、`tools/range_check.py`（补非-httpx 异常捕获）、`memory/log.py`（`query` 坏行跳过）、`tools/bird_id.py`（ok=False 套统一文案）、`agent/prompt.py`（加“工具失败处理策略”段 + `today_hint()` 日期注入）、`scripts/{check_s6,run_s6}.py`。**日期注入已覆盖全部 6 个真模型入口**（run_s2/s3/s4/s5/s6 + run_deepseek）。验收：check_s6 **24/24** + 回归全绿。 |
 | **S7** | ⬜ 未开始 | `evals`：`evals/tasks.yaml` + `evals/run_evals.py` + 通过率。`evals/` 目录尚不存在。注：`scripts/check_s*.py` 是各切片的离线自检，**不是** eval 框架。 |
 | **S8** | ⬜ 未开始（部分） | `cli` 打磨 + `README` + `DECISIONS.md`。现状：`DECISIONS.md` 已有 **6 条**取舍、`README.md` 仅 3 行很简、`vibirding/cli.py` 未建。 |
-| **S9** | 🗒️ 已登记，未实现 | **批量笔记**（同登记于 architecture §11）：一篇笔记含多条记录、各记录可带各自照片 URL，一次输入 → 多条 Observation。**依赖 S1–S8 单条主线完整且经 eval 验证后再做**，见 §6。 |
+| **S9** | 🗒️ 已登记，未实现 | **批量笔记**（同登记于 architecture §11）：一篇笔记含多条记录、各记录可带各自的本地照片路径 `image_path`，一次输入 → 多条 Observation。**依赖 S1–S8 单条主线完整且经 eval 验证后再做**，见 §6。 |
 
 ---
 
 ## 3. 当前所处切片 / 下一步
-- **现在**：S1–S6 全部完成并提交（HEAD `b071589`，工作树干净）。四个工具 `read_log + range_check + bird_id + append_log` 均已接入；agent 能整理笔记→（鉴种/核验）→过权限闸写盘→查回；budget 有步数+token 双上限与优雅收尾；工具失败统一容错；运行时日期锚点已覆盖所有真模型入口。离线自检五套全绿（132/132）。
+- **现在**：S1–S6 全部完成并提交（HEAD `11b9fe0`，工作树干净）。四个工具 `read_log + range_check + bird_id + append_log` 均已接入；agent 能整理笔记→（鉴种/核验）→过权限闸写盘→查回；budget 有步数+token 双上限与优雅收尾；工具失败统一容错；运行时日期锚点已覆盖所有真模型入口。离线自检五套全绿（132/132）。
 - **下一步 = 开工 S7（evals：10–15 用例 + 通过率，验收“一条命令出通过率”）**。要点：
-  1. `evals/tasks.yaml`：每条含 `input_note` / `photo_url` / `expected`（`place`/`count`/`must_call_tools`/`species_in: [...,null]`）；
+  1. `evals/tasks.yaml`：每条含 `input_note` / `image_path`（本地图片路径，无图为 null）/ `expected`（`place`/`count`/`must_call_tools`/`species_in: [...,null]`）；
   2. `evals/run_evals.py`：对每条跑 agent，比对①结构化字段②是否调了该调的工具③是否乱调写入，输出**通过率 + 逐条 pass/fail**；
-  3. **跑法已拍板（architecture §9 + DECISIONS.md 已记录）**：用**低温真 DeepSeek**（不用 Mock），脚本内**必须限调用次数**（每条小 `Budget(max_steps=…)` + 总用例数上限）；**⚠ 带 `photo_url` 的用例必须严格限量**，因为懂鸟 API 只有 50 次免费调用（见 §7）；用例集以**无图为主**；
+  3. **跑法已拍板（architecture §9 + DECISIONS.md 已记录）**：用**低温真 DeepSeek**（不用 Mock），脚本内**必须限调用次数**（每条小 `Budget(max_steps=…)` + 总用例数上限）；**⚠ 带 `image_path` 的用例必须严格限量**，因为懂鸟 API 只有 50 次免费调用（见 §7）；用例集以**无图为主**；
   4. eval 不能污染真 `data/observations.jsonl`：用注入式自动 approver + 临时 `Log`（复用 S5/S6 范式）。
 - 铁律：开工前先在 architecture 确认契约（§9 eval 设计 / §4 数据结构），再写代码；一次一个切片、commit per slice。
 
 ---
 
 ## 4. 与 architecture.md 已对齐的最近重要改动（时间倒序，每条三行内）
+
+0. **`photo_url → image_path` 术语统一**（本轮，未提交）
+   - 早期文档遗留的 `photo_url` / “照片 URL” 与 S4 的实际实现不符：`bird_id` 的入参一直是**本地路径 `image_path`**（`tools/bird_id.py` 会做 `Path().exists()` 校验，明确不吃 URL）。
+   - 改动面：architecture §1 一句话/流程图、§9 eval 模板与配额约束、§11 S9 登记；STATUS §2 S9 行、§3 下一步要点、§6 S9 条目。**纯术语，无代码改动**——S7 写 `tasks.yaml` 时字段名以此为准。
 
 1. **文档一致性同步 + 修正过时表述**（commit `b071589`）
    - architecture §3 补 `today_hint()`、§9 写入 S7 跑法决策与懂鸟配额约束；**§8 删掉“range_check 尚未实现”的过时注**（S3 早已接入，该注会误导冷启动者）。
@@ -89,7 +93,7 @@
 
 - **S7（下一步）**：evals（10–15 用例 + 通过率）。**跑法已定：真 DeepSeek + 脚本内限调用次数；带图用例受懂鸟 50 次免费额度限制须严格限量（见 §7、architecture §9）。** eval 时观察“range_check 清单内挑种”准确度（曾见模型对“黑头红腿小涉禽”选蛎鹬而非黑翅长脚鹬）；range_check 名单收窄目前只按 `back` 天 + 展示截断（未按目标科）、坐标表仅 8 点 exact-match——按需在此优化。
 - **S8**：`cli` 打磨（`vibirding/cli.py` 未建）+ `README`（现仅 3 行，要让别人能 clone 跑起来）+ 继续补 `DECISIONS.md`。
-- **S9（已登记，未实现）**：批量笔记——一篇含多条记录、各带各自照片 URL → 多条 Observation。待解点：多次/批量 `append_log` 的**权限确认粒度**、**图文配对**、**部分失败处理**、**预算放大**、**多记录 eval**。依赖 S1–S8 单条主线完整且经 eval 验证后再做（同登记于 architecture §11）。
+- **S9（已登记，未实现）**：批量笔记——一篇含多条记录、各带各自的本地照片路径 `image_path` → 多条 Observation。待解点：多次/批量 `append_log` 的**权限确认粒度**、**图文配对**、**部分失败处理**、**预算放大**、**多记录 eval**。依赖 S1–S8 单条主线完整且经 eval 验证后再做（同登记于 architecture §11）。
 - **§11 进阶（v1 之后）**：核验子 agent（多 agent，把 bird_id + range_check + read_log 合起来判 flags）；本地模型（OpenAI 兼容端点，`--local`，只动 `llm/` 一个文件）；大工具结果移出 prompt / SQLite 替代 JSONL（数据量大了再说）。
 
 ---
@@ -105,7 +109,7 @@
 ---
 
 ## 8. git 状态
-- **最近一次 commit（HEAD）**：`b071589 docs: sync architecture/DECISIONS with current code, fix stale notes`。其前依次为 `bc87963`(S7决策) / `b67d50f`(日期注入补齐) / `98bf526`(STATUS) / `f96f356`(ToolManager 全仓改名)。
-- **未提交的改动**：本次盘点写完后，仅 `docs/STATUS.md` 一个文件——确认无误即 commit；其余代码与文档自 `b071589` 起无改动，工作树此前干净。
-- 切片提交链（新→旧）：文档同步 `b071589` → S7决策 `bc87963` → 日期注入 `b67d50f` → STATUS `98bf526` → 改名 `f96f356` → status 修订 `f75d9a2` → 快照 `df55da9` → S9登记 `bb49219` → S6 `15b51d3` → S5 `68d713e` → S4 `8a74898`（+ 文档 `fdbda66`）→ S3 `bd04472`+`69a67f8` → docs 入库治理 `b800e47` → `cad77db fix: prompt` → `cd8038a add deepseek` → `08b6ccf add gemini` → `0e7dbda s1 finished`。
+- **最近一次 commit（HEAD）**：`11b9fe0 docs: status`。其前依次为 `b071589`(文档一致性同步) / `bc87963`(S7决策) / `b67d50f`(日期注入补齐) / `98bf526`(STATUS) / `f96f356`(ToolManager 全仓改名)。
+- **未提交的改动**：本轮 `photo_url → image_path` 术语统一，仅 `docs/architecture.md` + `docs/STATUS.md` 两个文件（纯文档，无代码改动）——确认无误即 commit。其余代码自 `11b9fe0` 起无改动，工作树此前干净。
+- 切片提交链（新→旧）：STATUS `11b9fe0` → 文档同步 `b071589` → S7决策 `bc87963` → 日期注入 `b67d50f` → STATUS `98bf526` → 改名 `f96f356` → status 修订 `f75d9a2` → 快照 `df55da9` → S9登记 `bb49219` → S6 `15b51d3` → S5 `68d713e` → S4 `8a74898`（+ 文档 `fdbda66`）→ S3 `bd04472`+`69a67f8` → docs 入库治理 `b800e47` → `cad77db fix: prompt` → `cd8038a add deepseek` → `08b6ccf add gemini` → `0e7dbda s1 finished`。
 - `docs/` 已正常跟踪，改动**不再需要 `git add -f`**。
