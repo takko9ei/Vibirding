@@ -33,7 +33,7 @@ except Exception:
     pass
 
 from vibirding.agent.loop import run_agent_turn  # noqa: E402
-from vibirding.agent.prompt import SYSTEM_PROMPT  # noqa: E402
+from vibirding.agent.prompt import SYSTEM_PROMPT, today_hint  # noqa: E402
 from vibirding.harness.budget import Budget  # noqa: E402
 from vibirding.harness.permissions import Permissions  # noqa: E402
 from vibirding.harness.trace import TraceWriter  # noqa: E402
@@ -99,7 +99,8 @@ def main() -> int:
     budget = Budget(max_steps=5)  # bird_id round (+ maybe range_check) + final
     permissions = Permissions()
     messages = [
-        {"role": "system", "content": SYSTEM_PROMPT},
+        # Date injection at the entry layer: SYSTEM_PROMPT stays a static constant.
+        {"role": "system", "content": SYSTEM_PROMPT + "\n\n" + today_hint()},
         {"role": "user", "content": user_content},
     ]
     events: list = []

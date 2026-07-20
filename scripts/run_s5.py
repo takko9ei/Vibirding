@@ -32,7 +32,7 @@ except Exception:
     pass
 
 from vibirding.agent.loop import run_agent_turn  # noqa: E402
-from vibirding.agent.prompt import SYSTEM_PROMPT  # noqa: E402
+from vibirding.agent.prompt import SYSTEM_PROMPT, today_hint  # noqa: E402
 from vibirding.harness.budget import Budget  # noqa: E402
 from vibirding.harness.permissions import Permissions  # noqa: E402
 from vibirding.harness.trace import TraceWriter  # noqa: E402
@@ -46,7 +46,8 @@ from vibirding.tools.registry import ToolManager  # noqa: E402
 
 # A note that names the species + place, so the write path is the focus (the model
 # may still call range_check to sanity-check). Override via argv.
-DEFAULT_NOTE = "2025-06-27 上午，葛西临海公园，约15只黑翅长脚鹬在浅滩觅食。"
+# No date on purpose: today_hint() is what supplies obs_date.
+DEFAULT_NOTE = "上午在葛西临海公园，约15只黑翅长脚鹬在浅滩觅食。"
 # A second-turn question that should make the model call read_log on the same log.
 QUERY_NOTE = "我在葛西临海公园都记录过哪些鸟？"
 
@@ -93,7 +94,8 @@ def _turn(llm, registry, permissions, note: str, run_id: str, max_steps: int):
     trace = TraceWriter(run_id=run_id)
     budget = Budget(max_steps=max_steps)
     messages = [
-        {"role": "system", "content": SYSTEM_PROMPT},
+        # Date injection at the entry layer: SYSTEM_PROMPT stays a static constant.
+        {"role": "system", "content": SYSTEM_PROMPT + "\n\n" + today_hint()},
         {"role": "user", "content": note},
     ]
     events: list = []
