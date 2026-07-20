@@ -65,7 +65,7 @@ Vibirding/
 │   │   └── mock.py              # 脚本化假模型，离线测循环 & 跑 eval
 │   ├── agent/
 │   │   ├── loop.py              # run_agent_turn()：手动循环+预算+容错
-│   │   └── prompt.py            # system prompt
+│   │   └── prompt.py            # system prompt(静态常量) + today_hint()：运行时日期锚点，入口层组装 messages 时拼入
 │   ├── tools/
 │   │   ├── registry.py          # ToolManager：注册/校验/执行/归一化
 │   │   ├── bird_id.py           # 鉴种 API 适配器（可替换）
@@ -275,7 +275,7 @@ cli 读入笔记 → messages=[{user: 笔记}]
 1. 笔记里**直接指定**了物种名 → `species` 填用户给的名字，`confidence=None`，`source="user"`；有没有图片/描述都如此。
 2. 在第1条基础上，若同时有图片或外形描述，且自动鉴定（图片或描述推断）结果与用户指定**不一致** → `species` 仍用用户指定，但 `flags` 加入 `"autoid_conflict"`（与自动鉴定有分歧）。
 3. 没指定种名但**有图片** → 以 `bird_id` 结果为准，`source="bird_id"`。
-4. 既没种名也没图片 → 走"描述 → 模型推断 → `range_check` 季节核验"，`source="inferred"`；拿不准就 `species=None` 并加 `"low_confidence"`。**注：`range_check` 尚未实现，接入前第4条暂降级为"仅靠模型鸟类学知识推断"。**
+4. 既没种名也没图片 → 走"描述 → 模型推断 → `range_check` 季节核验"，`source="inferred"`；拿不准就 `species=None` 并加 `"low_confidence"`。（`range_check` 已于 S3 实现并接入；仅当它不可用时——未知地点 / 网络失败 / 空清单——第4条才退回"仅靠模型鸟类学知识推断"，并按 prompt 的失败处理策略酌情标 `low_confidence`。）
 
 ---
 
@@ -294,7 +294,10 @@ cli 读入笔记 → messages=[{user: 笔记}]
     species_in: ["黑翅长脚鹬", null]       # 允许的种（含"拿不准"）
 ```
 
-**`run_evals.py`** —— 对每条任务跑 agent（用 `MockClient` 或低温的真 DeepSeek），比对：结构化字段是否匹配、是否调了该调的工具、是否乱调写入。输出**通过率 + 逐条 pass/fail**。
+**`run_evals.py`** —— 对每条任务跑 agent，比对：结构化字段是否匹配、是否调了该调的工具、是否乱调写入。输出**通过率 + 逐条 pass/fail**。
+
+> **跑法（S7 已拍板）**：用**低温的真 DeepSeek**，不用 `MockClient`——DeepSeek API 便宜、token 不是瓶颈，真模型才测得出真实表现；但脚本**必须限制调用次数**（每条用例给小的 `Budget(max_steps=…)`，并对总用例数设上限）。
+> **⚠ 真正稀缺的是懂鸟(hholove) API：只有 50 次免费调用**（它是 `bird_id` 的后端）。因此**带 `photo_url` 的用例必须严格限量**，用例集以**无图为主**（覆盖 range_check / 描述推断 / 写入路径），带图用例只留极少数。
 
 > 这个通过率曲线 + 你能解释"没过的为什么难"，是简历里最硬的一块。
 

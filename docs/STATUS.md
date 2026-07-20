@@ -93,7 +93,7 @@
 ---
 
 ## 7. 当前已知未决 / 需人拍板
-- **[已拍板] S7 用真 DeepSeek 跑用例**（不用 Mock）：DeepSeek API 很便宜、token 不是瓶颈；但 eval 脚本**必须限制调用次数**（每条用例给小的 `Budget(max_steps=…)`，并对总用例数设上限）。
+- **[已拍板] S7 用真 DeepSeek 跑用例**（不用 Mock）：DeepSeek API 很便宜、token 不是瓶颈；但 eval 脚本**必须限制调用次数**（每条用例给小的 `Budget(max_steps=…)`，并对总用例数设上限）。**该决策已写入 architecture §9（唯一事实来源）与 `DECISIONS.md`**，S7 开工时直接照做即可。
 - **⚠ 真正稀缺的配额 = 懂鸟(hholove) API：只有 50 次免费调用。** 它是 `bird_id` 的后端，所以 **S7 的带图用例必须严格限量**——优先用无图用例覆盖 range_check / 描述推断 / 写入路径，带图用例只留极少数；`scripts/run_s4.py` 每跑一次都会真调懂鸟，也要省着用。
 - **S6 端到端 `run_s6.py` 真模型触发**：离线 check_s6 24/24 已绿；live 三种触发（`--max-steps 1` / `--max-tokens 50` / `--break-ebird`）可手动跑看 trace，非阻塞。
 - **DeepSeek 账户额度**：曾遇 `429`（额度耗尽）/`503`（过载）；用户表示 DeepSeek 很便宜、额度不必担心（瓶颈在懂鸟，见上条）。
@@ -103,7 +103,7 @@
 ---
 
 ## 8. git 状态
-- **最近一次 commit（HEAD）**：`98bf526 docs: update status.md`。其前依次为 `f96f356`(ToolManager 全仓改名) / `f75d9a2` / `df55da9`(完整快照) / `bb49219`(S9登记) / `15b51d3`(S6)。
-- **未提交的改动**：① 日期注入补齐——`scripts/{run_s2,run_s3,run_s4,run_s5,run_deepseek}.py` 各加 `today_hint()` 注入、run_s5 删掉写死日期；② 本文件 STATUS 更新。均待提交。
-- 切片提交链（新→旧）：STATUS `98bf526` → 改名 `f96f356` → status 修订 `f75d9a2` → 快照 `df55da9` → S9登记 `bb49219` → S6 `15b51d3` → S5 `68d713e` → S4 `8a74898`（+ 文档 `fdbda66`）→ S3 `bd04472`+`69a67f8` → docs 入库治理 `b800e47` → `cad77db fix: prompt` → `cd8038a add deepseek` → `08b6ccf add gemini` → `0e7dbda s1 finished`。
+- **最近一次 commit（HEAD）**：`bc87963 docs: record S7 run decision and hholove quota constraint`；其前 `b67d50f fix: inject today_hint into all real-model entry scripts` / `98bf526` / `f96f356`(ToolManager 全仓改名) / `df55da9`(完整快照)。
+- **未提交的改动**：文档一致性同步——`docs/architecture.md`（§3 补 `today_hint`、§8 删掉"range_check 尚未实现"的过时注、§9 记录 S7 跑法与懂鸟配额）+ `DECISIONS.md`（修正过时的"v1 暂不接 eBird"、新增"日期注入放入口层"与"S7 用真 DeepSeek"两条取舍）。
+- 切片提交链（新→旧）：S7决策文档 `bc87963` → 日期注入 `b67d50f` → STATUS `98bf526` → 改名 `f96f356` → status 修订 `f75d9a2` → 快照 `df55da9` → S9登记 `bb49219` → S6 `15b51d3` → S5 `68d713e` → S4 `8a74898`（+ 文档 `fdbda66`）→ S3 `bd04472`+`69a67f8` → docs 入库治理 `b800e47` → `cad77db fix: prompt` → `cd8038a add deepseek` → `08b6ccf add gemini` → `0e7dbda s1 finished`。
 - `docs/` 已正常跟踪，改动**不再需要 `git add -f`**。
