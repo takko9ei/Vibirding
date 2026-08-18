@@ -281,20 +281,55 @@ cli 读入笔记 → messages=[{user: 笔记}]
 
 ## 9. Eval 设计
 
-**`tasks.yaml`** —— 每条一个测试用例
+**两份文件（防泄题）**：题目与答案分离——喂给模型的只有题目档，答案档只有评分器读，杜绝任何路径把答案漏进 prompt。两档按 `id` 配对。
+
+**题目档 `evals/tasks.yaml`** —— 每条只有输入，绝不含答案：
 
 ```
-- id: t01
-  input_note: "上午卡西临海公园，大概20只黑头红腿小型涉禽"
-  image_path: null                       # 本地图片路径（bird_id 的入参形状），无图为 null
+- id: t00
+  input_note: "7月12日上午 葛西临海公园 大嘴乌鸦 3只"   # 笔记原文（内联）
+  image_path: null                                     # 本地图片路径（bird_id 入参），无图为 null
+```
+
+**答案档 `evals/answers.yaml`** —— 每条只有断言，按 `id` 与题目档配对：
+
+```
+- id: t00
   expected:
-    place: "卡西临海公园"
-    count: 20
-    must_call_tools: ["append_log"]      # 期望它最终写了日志
-    species_in: ["黑翅长脚鹬", null]       # 允许的种（含"拿不准"）
+    place: "葛西临海公园"
+    count: 3
+    species_in: ["大嘴乌鸦"]
+    source: "user"
+    confidence: null
+    must_call_tools: ["append_log"]
 ```
 
-**`run_evals.py`** —— 对每条任务跑 agent，比对：结构化字段是否匹配、是否调了该调的工具、是否乱调写入。输出**通过率 + 逐条 pass/fail**。
+**expected 支持的断言键（评分契约）**——**全部可选**，只断言写了的键；一条用例的所有断言**全过**才 PASS：
+
+| 键 | 形态 | 判定 |
+| --- | --- | --- |
+| `place` | str | `actual.place` 精确相等 |
+| `count` | int/null | `actual.count` 精确相等（null→必须为空） |
+| `count_around` | int | `\|actual.count − N\| ≤ count_tol`（默认 ±5，可加 `count_tol` 覆盖）；`actual.count` 为空则 FAIL。用于"十几只"等模糊量词 |
+| `species_in` | list（可含 null） | `actual.species ∈ 清单`；清单含 `null` 表示"种为空也算对" |
+| `source` | str | `actual.source` 精确相等 |
+| `confidence` | null | `actual.confidence` 为空（当前仅用 null 形态：测 source=user 时不许给分值） |
+| `behavior_not_null` | true | `actual.behavior` 非空 |
+| `time_of_day_not_null` | true | `actual.time_of_day` 非空 |
+| `flags_contains_any` | list（token） | **命中即过**：存在某 token 是某条 `actual.flag` 的子串（or 语义 + 子串匹配，容忍模型用中文写 flag，如 "季节异常" 命中 "季节"） |
+| `must_call_tools` | list | **子集**：列出的工具名都在本回合 tool_call 事件里出现过（多调不算错） |
+| `tool_ok_even_if_unknown_place` | true | 若 `range_check` 被调用且地点不在坐标表，其 `ToolResult.ok` 仍为 True（优雅降级），且回合正常产出并写入 Observation |
+| `must_not_write` | true | 断言"不该写入"：发生 append_log 写入即 FAIL（**默认 false**；当前 13 条均需写入，故都不设——must_call_tools 缺省**不**等于禁止写入） |
+
+> 判定所依据的 `actual`：跑完 agent 后，从**该用例专属的临时 Log** 读回写入的 Observation（未写入 → 字段类断言自然 FAIL 并打印"未发生写入"）；工具调用情况取自 trace 的 tool_call 事件。
+
+**`run_evals.py`** —— 对每条用例跑 agent，按上表比对，输出**通过率 + 逐条 pass/fail**；FAIL 打印逐字段"期望 vs 实际" + 实际工具调用序列 + trace 路径，便于分析"为什么没过"。
+
+**两档运行**（`--offline` 默认 / `--online`）：
+- **离线档（默认）**：`MockClient` + `range_check`/`bird_id` 桩工具，零网络 / 零 key / 不碰真日志。评分器**据 answers 合成"理想模型"剧本**驱动真实循环，故应稳定 100%——它守护的是"循环→registry→权限闸→Log→读回"这条管线与比对器本身没被改坏（**回归保险**）。
+- **在线档（`--online`）**：低温真 DeepSeek + 真工具，测**真实识别质量**，允许非满分即真实指标。缺 `DEEPSEEK_API_KEY` 直接报错退出。默认**跳过带图用例**；`--online-images` 才放开（保护懂鸟额度）。`--max-cases` / `--ids` / `--max-steps` 控量。
+
+**隔离**：每条用例用临时 Log（永不碰 `data/observations.jsonl`）+ 注入式自动 approver（返回 "always"，不走 stdin）；eval trace 写临时目录、跑完清理（复用 S5/S6 范式）。
 
 > **跑法（S7 已拍板）**：用**低温的真 DeepSeek**，不用 `MockClient`——DeepSeek API 便宜、token 不是瓶颈，真模型才测得出真实表现；但脚本**必须限制调用次数**（每条用例给小的 `Budget(max_steps=…)`，并对总用例数设上限）。
 > **⚠ 真正稀缺的是懂鸟(hholove) API：只有 50 次免费调用**（它是 `bird_id` 的后端）。因此**带 `image_path` 的用例必须严格限量**，用例集以**无图为主**（覆盖 range_check / 描述推断 / 写入路径），带图用例只留极少数。

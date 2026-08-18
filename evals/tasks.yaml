@@ -1,0 +1,60 @@
+# S7 eval — 题目档（只有输入，绝不含答案）。答案在 evals/answers.yaml，按 id 配对。
+# 目的：喂给模型的只有这份，杜绝任何路径把 expected 漏进 prompt（防泄题）。
+# 素材来源：testmat/descriptionN.txt（人工编写的真实观鸟笔记）。当前 13 条全部无图。
+#
+# 每条字段：
+#   id          用例编号，与 answers.yaml 一一对应
+#   input_note  笔记原文（内联）
+#   image_path  本地图片路径（bird_id 入参形状）；无图为 null
+
+- id: t00
+  input_note: "7月12日上午 葛西临海公园 大嘴乌鸦 3只"
+  image_path: null
+
+- id: t01
+  input_note: "水元公园 栗耳短脚鹎 5只 在树上一直叫"
+  image_path: null
+
+- id: t02
+  input_note: "傍晚 葛西临海公园 家燕 十几只 在低空来回飞"
+  image_path: null
+
+- id: t03
+  input_note: "今天在明治神宫看到灰喜鹊"
+  image_path: null
+
+- id: t04
+  input_note: "葛西临海公园 红嘴鸥 20只"
+  image_path: null
+
+- id: t05
+  input_note: "7月14日 水元公园 斑鸫 2只 在草地上"
+  image_path: null
+
+- id: t06
+  input_note: "在等等力溪谷看到山斑鸠 2只"
+  image_path: null
+
+- id: t07
+  input_note: "早上 葛西临海公园 一小群褐色小鸟，头顶栗色，脸颊有黑斑，在地上蹦着找食"
+  image_path: null
+
+- id: t08
+  input_note: "停车场地上一只黑白相间的小鸟，尾巴一直上下摆，走走停停"
+  image_path: null
+
+- id: t09
+  input_note: "水元公园 一大群中等大小的鸟，脸颊白色，嘴橙黄，在草地上成片走"
+  image_path: null
+
+- id: t10
+  input_note: "葛西临海公园海边，白色小型燕鸥，黄嘴带黑尖，在水面悬停后扎下去"
+  image_path: null
+
+- id: t11
+  input_note: "路边一只灰褐色的小鸟，很快就飞走了没看清"
+  image_path: null
+
+- id: t12
+  input_note: "7月 水元公园 一只小鸟，腹部橙红色，翅膀上有明显白斑，站着不停抖尾巴"
+  image_path: null

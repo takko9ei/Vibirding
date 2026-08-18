@@ -1,0 +1,97 @@
+# S7 eval — 答案档（只有断言 expected，只有评分器读，防泄题）。按 id 与 tasks.yaml 配对。
+# 断言键语义见 docs/architecture.md 第9节的"评分契约"表；全部可选，只断言写了的键，全过才 PASS。
+#
+# 覆盖的分支：
+#   有种名(source=user)       t00 t01 t02 t03 t04 t05 t06
+#   无种名靠描述(source=inferred) t07 t08 t09 t10 t11 t12
+#   拿不准 -> species=null       t11（唯一"就该拿不准"），t07/t08/t10/t12 允许 null
+#   季节异常(冬候鸟出现在7月)     t04 红嘴鸥 / t05 斑鸫 / t12 北红尾鸲
+#   未知地点优雅降级             t06 山斑鸠@等等力溪谷（不在坐标表）
+
+- id: t00
+  expected:
+    place: "葛西临海公园"
+    count: 3
+    species_in: ["大嘴乌鸦"]
+    source: "user"
+    confidence: null            # source=user 不许给分值置信度
+    must_call_tools: ["append_log"]
+
+- id: t01
+  expected:
+    place: "水元公园"
+    count: 5
+    species_in: ["栗耳短脚鹎"]
+    behavior_not_null: true     # "在树上一直叫" 应进 behavior
+    source: "user"
+    must_call_tools: ["append_log"]
+
+- id: t02
+  expected:
+    place: "葛西临海公园"
+    count_around: 15            # "十几只" ≈ 15（默认容差 ±5，即 10~20）
+    species_in: ["家燕"]
+    time_of_day_not_null: true  # "傍晚"
+    source: "user"
+
+- id: t03
+  expected:
+    species_in: ["灰喜鹊"]
+    count: null                 # 无数量时 count 应老实置空，不许瞎编
+    source: "user"
+
+- id: t04
+  expected:
+    species_in: ["红嘴鸥"]       # 优先级：仍取用户指定，不许"纠正"成别的鸟
+    source: "user"
+    flags_contains_any: ["season_unusual", "季节", "分布"]  # 7月东京红嘴鸥属反常
+    must_call_tools: ["range_check", "append_log"]
+
+- id: t05
+  expected:
+    species_in: ["斑鸫"]
+    source: "user"
+    flags_contains_any: ["season_unusual", "季节", "分布"]  # 斑鸫为冬候鸟
+    must_call_tools: ["range_check"]
+
+- id: t06
+  expected:
+    species_in: ["山斑鸠"]
+    source: "user"
+    tool_ok_even_if_unknown_place: true   # 等等力溪谷不在坐标表，range_check 应优雅降级(ok=True)
+
+- id: t07
+  expected:
+    species_in: ["树麻雀", "麻雀", null]
+    source: "inferred"
+    must_call_tools: ["range_check"]
+
+- id: t08
+  expected:
+    species_in: ["白鹡鸰", null]
+    source: "inferred"
+
+- id: t09
+  expected:
+    place: "水元公园"
+    species_in: ["灰椋鸟", null]
+    source: "inferred"
+
+- id: t10
+  expected:
+    species_in: ["白额燕鸥", "普通燕鸥", null]
+    source: "inferred"
+    must_call_tools: ["range_check"]
+
+- id: t11
+  expected:
+    species_in: [null]          # 期望就是"拿不准"
+    flags_contains_any: ["low_confidence"]
+    source: "inferred"
+
+- id: t12
+  expected:
+    species_in: [null, "北红尾鸲"]
+    flags_contains_any: ["low_confidence", "season_unusual", "季节"]
+    source: "inferred"
+    must_call_tools: ["range_check"]   # 描述指向北红尾鸲（冬候鸟，7月东京不该有）
