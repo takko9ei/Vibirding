@@ -55,6 +55,7 @@ Vibirding/
 ├── README.md
 ├── DECISIONS.md                 # 每个取舍记三行 ← 面试逐字稿
 ├── requirements.txt
+├── .env.example                 # 三把 key 占位(DEEPSEEK_/EBIRD_/HHO_API_KEY)，复制成 .env 再填；绝不含真实值
 ├── vibirding/                    # 主包（可导入的 Python 包，小写）
 │   ├── __init__.py
 │   ├── config.py                # 路径、模型名(deepseek-v4-flash)、base_url、从 .env 读 DEEPSEEK_API_KEY
@@ -78,15 +79,20 @@ Vibirding/
 │   │   ├── permissions.py       # 风险分级 + 写入审批
 │   │   ├── budget.py            # 步数/token 预算 + 停止原因
 │   │   └── trace.py             # JSONL 轨迹写入器
-│   └── cli.py                   # 入口：读笔记 → 跑 agent → 显示结果
+│   ├── cli.py                   # 交付级入口：注册四工具→跑 agent→展示；记录/查询两用；--image/--yes/--verbose；入口层拼 SYSTEM_PROMPT+today_hint()+意图路由前言
+│   └── __main__.py              # 使 `python -m vibirding` 可用：调 cli.main()
 ├── evals/
-│   ├── tasks.yaml               # 固定测试用例
-│   └── run_evals.py             # 跑 agent、打分、出通过率
+│   ├── tasks.yaml               # 固定用例（题目：input_note/image_path，无答案）
+│   ├── answers.yaml             # 固定用例（答案：expected，独立文件防泄题）
+│   ├── run_evals.py             # 跑 agent、打分、出通过率（--offline 默认 / --online）
+│   └── REPORT.md                # eval 首跑报告（结果 + FAIL 归因 + 复现）
 ├── scripts/                     # 开发期临时冒烟测试脚本（如 run_s1.py），不属于最终交付结构
 └── data/                        # gitignore：日志、轨迹
     ├── observations.jsonl
     └── traces/
 ```
+
+> **注（S8 / cli 入口层组装）**：`cli.py` 组装 messages 时，system 内容按顺序拼接 `SYSTEM_PROMPT`（静态常量，**不变**）+ `today_hint()` + **意图路由前言**——让模型先判断这是「记录新观测」还是「查询历史」：查询则只调 `read_log` 直接作答、**不写盘**。这是**入口层组装**（与 `today_hint()` 同一手法），`SYSTEM_PROMPT` 常量与四个工具的行为均不改动。记录/查询由模型据此自判，CLI 不设子命令。
 
 ---
 
