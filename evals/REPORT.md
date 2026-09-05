@@ -2,6 +2,10 @@
 
 > 首次运行：2026-08-18。对应切片 S7（architecture §9 / §10）。
 > 复现命令见文末。本报告只记录**这一次**的运行与归因；后续再跑请追加小节或另建报告。
+>
+> **历史口径说明**：下文提到的临时 JSONL、真日志守卫和 132/132，是 S7 首跑时的
+> v1 实际状态。v2 第 1 步已将当前 `run_evals.py` 改为 PostgreSQL 临时 schema 隔离；
+> 用例内容和离线 13/13 基线不变。
 
 ---
 
@@ -78,6 +82,13 @@
 
 ## 6. 复现
 
+当前版本复现前需启动本地 PostgreSQL，并在 `.env` 中设置 `DATABASE_URL`：
+
+```powershell
+docker compose up -d postgres
+.venv\Scripts\python.exe -m alembic upgrade head
+```
+
 ```powershell
 # 离线（默认，安全，应 100%）
 .venv\Scripts\python.exe evals\run_evals.py
@@ -91,4 +102,5 @@
 ```
 
 - 带图用例（当前无）在线默认跳过，需 `--online-images` 才放开（保护懂鸟 hholove 约 50 次免费额度）。
+- 当前每个用例使用独立 PostgreSQL 临时 schema；不会读写开发 schema，结束后自动删除。
 - 失败用例的临时目录 / trace **不删**（路径见运行输出），便于逐步回看循环；通过的用例临时目录自动清理。

@@ -16,7 +16,7 @@
 - 抽成结构化字段（地点 / 日期 / 时段 / 种 / 数量 / 行为 / 原文…）；
 - 拿不准种时，调**懂鸟**做图片鉴种、或调 **eBird** 取当地当季物种清单再挑种；
 - 按"用户指定 > 图片鉴定 > 描述推断"的优先级裁决物种来源；
-- 写盘前**必须经你确认**，落成 append-only 的 `observations.jsonl`；
+- 写入前**必须经你确认**，然后事务化保存到 PostgreSQL；
 - 之后你可以直接问"我在某地记录过哪些鸟"，它查日志回答。
 
 ---
@@ -50,7 +50,7 @@ flowchart TD
     RC -. 结果回填 .-> M
     RL -. 结果回填 .-> M
     M -->|整理出一条 Observation| GATE{"写入权限闸<br/>y / n / a"}
-    GATE -->|允许| LOG[("observations.jsonl<br/>append-only")]
+    GATE -->|允许| LOG[("PostgreSQL<br/>observations")]
     GATE --> SUM["给用户最终总结<br/>(每步落一行 trace)"]
 ```
 
@@ -69,7 +69,7 @@ flowchart TD
 
 ## 快速开始
 
-需要 Python 3.10+。
+需要 Python 3.10+ 和 Docker Desktop。
 
 ```bash
 git clone <this-repo> && cd Vibirding
@@ -78,8 +78,13 @@ python -m venv .venv
 # Linux/macOS:        source .venv/bin/activate
 pip install -r requirements.txt
 
-cp .env.example .env      # 然后编辑 .env 填入你的 key（见下）
+Copy-Item .env.example .env   # PowerShell；然后编辑 .env
+docker compose up -d postgres
+python -m alembic upgrade head
 ```
+
+以上两条数据库命令分别负责启动本地 PostgreSQL，以及把数据库结构升级到当前版本。
+`DATABASE_URL` 已在 `.env.example` 中给出本地默认值。
 
 **API key（在 `.env` 里配）**：
 
@@ -95,7 +100,7 @@ cp .env.example .env      # 然后编辑 .env 填入你的 key（见下）
 python -m vibirding "傍晚葛西临海公园家燕十几只在低空飞"
 ```
 
-**零配置自检**（不需要任何 key、不联网）：
+**离线 eval**（不需要任何 API key 或外部网络，但需要本地 PostgreSQL）：
 
 ```bash
 python evals/run_evals.py     # 离线 eval，应 13/13
@@ -137,7 +142,7 @@ python -m vibirding "水元公园一只小鸟腹部橙红抖尾" --image bird.jp
 
 | 档   | 命令                                 | 结果              | 含义                                                                                |
 | ---- | ------------------------------------ | ----------------- | ----------------------------------------------------------------------------------- |
-| 离线 | `python evals/run_evals.py`          | **13/13 = 100%**  | MockClient + 桩工具，零网络/零 key；据答案合成"理想模型"驱动真实循环 → **回归保险** |
+| 离线 | `python evals/run_evals.py`          | **13/13 = 100%**  | MockClient + 桩工具 + PostgreSQL 临时 schema；零外部网络/零 key → **回归保险** |
 | 在线 | `python evals/run_evals.py --online` | **11/13 = 84.6%** | 低温真 DeepSeek + 真工具 → **真实识别质量指标**（允许非满分）                       |
 
 两条在线未过用例的逐条归因见 [evals/REPORT.md](evals/REPORT.md)。
@@ -148,9 +153,10 @@ python -m vibirding "水元公园一只小鸟腹部橙红抖尾" --image bird.jp
 
 - **手写 agent harness，不用 LangChain 等框架**——个人级单 agent，逻辑就一个回合循环；手写才能把每一步看懂、可控、可测。
 - **写入类操作过权限闸，且闸在执行路径内**——写入是唯一不可逆操作，"未经同意绝不落盘"必须内建、不能事后补。
+- **PostgreSQL 由 SQLAlchemy + Alembic 管理**——运行时用 ORM/repository 保持业务边界，数据库结构通过版本化 migration 演进。
 - **季节核验是主 agent 调的普通工具，不是核验子 agent**——它只是"取一份数据"，单步无状态，工具契约已够，子 agent 会凭空加复杂度。
 
-完整 12 条取舍（含"为什么 JSONL 不用数据库""为什么手动函数调用不用 SDK 自动执行"）见 [DECISIONS.md](DECISIONS.md)。
+完整取舍记录见 [DECISIONS.md](DECISIONS.md)。
 
 ---
 
@@ -171,21 +177,24 @@ vibirding/          # 主包：cli 入口 + 循环 + 工具 + 记忆 + harness +
 ├── cli.py          #   统一入口（python -m vibirding）
 ├── agent/          #   loop.py 回合循环 · prompt.py 系统提示
 ├── tools/          #   registry + read_log/range_check/bird_id/append_log
-├── memory/         #   log.py append-only JSONL
+├── db/             #   SQLAlchemy session / ORM / repository
+├── memory/         #   log.py：保持 v1 append/query 外观
 ├── harness/        #   permissions / budget / trace
 └── llm/            #   deepseek_client（运行时）· mock（离线）· client（Gemini 备用）
+migrations/         # Alembic 数据库结构版本
 evals/              # 固定用例 + run_evals.py 两档打分 + REPORT.md
-scripts/            # 开发期脚手架：run_sX.py 手动跑单切片、check_sX.py 离线自检（非交付入口）
+scripts/            # check_sX/check_v2_db 自检 + 少量专项手动入口
 docs/               # architecture.md（唯一事实来源）· STATUS.md（进度快照）
-data/               # gitignore：observations.jsonl 日志 + traces/ 轨迹
+data/               # gitignore：运行时 JSONL trace（按需自动创建）
+docker-compose.yml  # 本地 PostgreSQL 服务
 ```
 
 ---
 
-## 未来计划（**均未实现**）
+## v2 后续计划
 
-- **批量笔记**：一篇含多条记录、各带各自图片 → 多条 Observation（待解：权限确认粒度 / 图文配对 / 部分失败 / 多记录 eval）。
-- **核验子 agent**：把 bird_id + range_check + read_log 的结果交给专职子 agent 二次判合理性、打 flag。
-- **本地模型**：给 LLM 客户端加一个 OpenAI 兼容端点实现（`--local`），因接口 provider 中立，只动 `llm/` 一个文件。
+- **2.1 文本拆分**：一篇笔记拆成多个草稿，共享地点和日期下发。
+- **2.2–2.5 批量与匹配**：照片预处理、物种名录、按 `species_id` 匹配、批量确认写入。
+- **3 Web**：FastAPI API、React 输入预览页和记录管理页。
 
-见 [docs/architecture.md](docs/architecture.md) §10–§11。
+完整范围与切片顺序见 [docs/architecture.md](docs/architecture.md) §10。
