@@ -10,7 +10,9 @@ All models use pydantic for validation.
 
 from __future__ import annotations
 
-from pydantic import BaseModel, Field
+from uuid import UUID
+
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class ToolCall(BaseModel):
@@ -68,6 +70,32 @@ class Observation(BaseModel):
     confidence: float | None = None  # from bird_id or the model's self-estimate
     source: str  # "user" | "bird_id" | "inferred" | "manual"
     flags: list[str] = Field(default_factory=list)  # e.g. ["season_unusual"]
+
+
+class DraftObservation(BaseModel):
+    """One text-derived observation awaiting preview and confirmation.
+
+    Slice 2.1 deliberately leaves taxonomy and photo fields empty. Keeping
+    those fields in the public shape now gives later matching slices a stable
+    object to enrich without changing the text splitter's return type.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    client_draft_id: str
+    place: str | None = None
+    obs_date: str | None = None
+    time_of_day: str | None = None
+    count: int | None = None
+    behavior: str | None = None
+    raw_note: str
+    species_label: str | None = None
+    species_id: UUID | None = None
+    confidence: float | None = None
+    source: str
+    flags: list[str] = Field(default_factory=list)
+    photo_ids: list[UUID] = Field(default_factory=list)
+    needs_confirmation: bool = False
 
 
 class TraceEvent(BaseModel):

@@ -11,13 +11,13 @@
 
 ## 0. 当前阶段与边界
 
-**当前代码状态仍是 v1。** 它是单条笔记、可选一张本地图片、CLI、JSONL 存储。
-v2 的架构已在本文锁定，但尚未开始任何 v2 代码实现。
+**当前代码状态是 v2 第 1 步已完成。** PostgreSQL、SQLAlchemy、Alembic 和 psycopg 3
+已经替换 JSONL 持久化，并保留 v1 单条 CLI、工具契约与离线 eval 基线。
 
-**当前允许实现的下一切片：第 1 步 PostgreSQL 存储替换。** 它只替换
-`memory/log.py` 的持久化底层，必须保持 `append_log` / `read_log` 的对外契约和
-v1 离线 eval 行为不变。不得在该切片提前引入批量解析、照片持久化、物种名录、
-FastAPI 或 React。
+**当前切片 2.1 文本拆分已实现，正在等待 review/commit。** 它只把一篇自然语言笔记
+拆成多个 `DraftObservation`，并把共享地点、日期、时段下发到每条草稿。本轮不得继续
+引入照片处理、物种名录与 `species_id` 映射、图文匹配、批量写库、FastAPI 或 React；
+文本拆分服务不写 observations。review 前不开始 2.2。
 
 **不迁移旧数据。** v1 真实 `data/` 为空；这次是 schema migration，不是数据 migration。
 
@@ -111,7 +111,7 @@ Vibirding/
 ├── migrations/                           # 第 1 步：数据库迁移
 ├── media/                                # 后续：gitignore，内容哈希文件名
 ├── vibirding/
-│   ├── schemas.py                        # v1 兼容模型 + v2 API/草稿模型
+│   ├── schemas.py                        # v1 兼容模型 + 第 2.1 步草稿模型
 │   ├── config.py                         # 路径、模型、外部 API、数据库配置
 │   ├── db/                               # 第 1 步
 │   │   ├── session.py                    # engine / session factory / 注入点
@@ -123,7 +123,7 @@ Vibirding/
 │   ├── llm/                              # 继承：DeepSeekClient / MockClient
 │   ├── harness/                          # 继承：permissions / budget / trace
 │   ├── tools/                            # 继承并后续扩展批量能力
-│   ├── services/                         # 后续：media / parse / matching / taxonomy
+│   ├── services/                         # 第 2.1 步 parse；后续 media / matching / taxonomy
 │   └── api/                              # 后续：FastAPI app、路由和依赖
 ├── frontend/                             # 后续：React 应用
 ├── evals/                                # 保留 v1 eval，后续新增 v2 用例
@@ -157,7 +157,11 @@ Observation
 `AppendLogInput` 仍是 Observation 去掉 `id` / `timestamp` 后的单条输入；
 `raw_note` 与 `source` 必填。第 1 步不能收紧 `source`、`flags`、`obs_date` 的 v1 校验。
 
-### 4.2 批量草稿模型（后续第 2 步）
+### 4.2 批量草稿模型
+
+第 2.1 步新增并实际使用 `DraftObservation`；`species_id` 和 `photo_ids` 先保持空值，
+为后续物种规范化与照片匹配保留稳定边界。`ParseResult` 在照片流程接入时再启用，
+本切片不提前制造空的照片领域对象。
 
 ```text
 DraftObservation
@@ -222,7 +226,7 @@ ParseResult
 | `db/repository.py` | 查询和持久化语义；不格式化给模型看的文本。 |
 | `services/taxonomy.py` | 后续：名录导入、别名/外部结果到内部 `species_id` 的映射。 |
 | `services/media.py` | 后续：内容哈希、去重、文件落盘和元数据。 |
-| `services/parse.py` | 后续：文本拆分、照片识别编排、草稿构造；解析阶段不写 observations。 |
+| `services/parse.py` | 第 2.1 步：文本拆分与草稿构造；后续再编排照片识别。解析阶段不写 observations。 |
 | `services/matching.py` | 后续：按 `species_id` 关联图文，输出可解释的匹配结果。 |
 | `api/` | 后续：FastAPI 输入验证、依赖注入、HTTP 状态码和响应；不直接嵌入业务 SQL。 |
 | `frontend/` | 后续：输入预览确认和记录管理；不重复后端规则。 |
@@ -263,7 +267,29 @@ log.query(place=None, species=None, date_range=None) -> list[Observation]
 `ReadLogTool` / `AppendLogTool` 的工具名、schema、risk、给模型的描述和文本输出在第 1 步不变；
 `AppendLogTool` 仍由它生成机器字段，只是 ID 改为完整 UUID 字符串。
 
-### 6.3 HTTP API 契约（后续第 3 步）
+### 6.3 第 2.1 步文本拆分契约
+
+```python
+TextSplitService.split(
+    text: str,
+    reference_date: date | None = None,
+) -> list[DraftObservation]
+```
+
+- 服务通过 provider-neutral 的 `LLMClient.complete()` 做一次模型调用，并声明无副作用的
+  `return_text_split` 返回工具；模型必须用该工具返回结构化参数，服务不执行任何外部工具。
+- 模型返回 `shared_context`（`place` / `obs_date` / `time_of_day`）和
+  `observations[]`。每条 observation 可省略共享字段以继承上下文，也可显式提供自己的值覆盖它。
+- `reference_date` 默认取本地当天，仅用于把“今天/昨天”等相对日期解析成 `YYYY-MM-DD`；
+  离线测试必须显式传固定日期，避免随运行日变化。
+- 服务按原顺序生成 `draft-1`、`draft-2`……作为本次响应内的 `client_draft_id`；
+  第 2.1 步固定 `species_id=None`、`photo_ids=[]`，且绝不写数据库。
+- 每条 `raw_note` 保存只与该条观测有关的原文片段；`source="user"`。无法确定物种或存在
+  歧义时必须令 `needs_confirmation=True`，不得编造物种。
+- 空白输入、缺少/重复返回工具调用、错误工具名、空 observations 或不符合 schema 的参数
+  都抛出 `TextSplitError`，不返回看似成功的部分结果。
+
+### 6.4 HTTP API 契约（后续第 3 步）
 
 ```text
 POST   /api/media

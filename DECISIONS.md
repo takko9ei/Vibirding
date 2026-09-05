@@ -2,6 +2,11 @@
 
 > 每个取舍记三行：**决定 / 为什么 / 代价或取舍**。面试逐字稿用。
 
+## v2：文本拆分用结构化返回工具 + 共享上下文信封
+- **决定**：2.1 用一次 provider-neutral 模型调用；模型通过 `return_text_split` 返回 `shared_context + observations[]`，服务端负责共享字段下发、草稿编号和 pydantic 校验。
+- **为什么**：共享上下文只抽取一次可减少重复和漂移，服务端合并能用确定性离线测试证明每条草稿都拿到地点/日期/时段；返回工具沿用现有手动函数调用边界，无需解析自由文本 JSON。
+- **代价/取舍**：拆分质量仍取决于模型，且不合规响应会整批失败；本切片选择 fail-fast，不在结构错误时猜测或静默保留部分草稿。
+
 ## v2：PostgreSQL 使用 SQLAlchemy 2.x + Alembic + psycopg 3
 - **决定**：同步数据访问使用 SQLAlchemy 2.x ORM，驱动使用 psycopg 3，schema migration 统一由 Alembic 管理；`observations.sequence_no` 使用数据库 identity 保证兼容查询能按插入顺序返回。
 - **为什么**：这套组合直接满足既定的 PostgreSQL、ORM、显式 migration 和 FastAPI 后续接入要求；identity 顺序不依赖时间戳或 UUID，能准确保留 v1 `Log.query()` 的可观察顺序。
