@@ -81,17 +81,18 @@ pip install -r requirements.txt
 Copy-Item .env.example .env   # PowerShell；然后编辑 .env
 docker compose up -d postgres
 python -m alembic upgrade head
+python scripts/import_ebird_taxonomy.py
 ```
 
-以上两条数据库命令分别负责启动本地 PostgreSQL，以及把数据库结构升级到当前版本。
-`DATABASE_URL` 已在 `.env.example` 中给出本地默认值。
+以上三条命令分别负责启动本地 PostgreSQL、把数据库结构升级到当前版本，以及从 eBird
+幂等导入当前物种名录。`DATABASE_URL` 已在 `.env.example` 中给出本地默认值。
 
 **API key（在 `.env` 里配）**：
 
 | 变量               | 是否必需              | 用途                                     | 申请                             |
 | ------------------ | --------------------- | ---------------------------------------- | -------------------------------- |
 | `DEEPSEEK_API_KEY` | **必需**              | 运行时大模型                             | <https://platform.deepseek.com/> |
-| `EBIRD_API_KEY`    | 调 range_check 时需要 | eBird 季节/分布数据                      | <https://ebird.org/api/keygen>   |
+| `EBIRD_API_KEY`    | range_check/名录导入需要 | eBird 季节分布与物种名录              | <https://ebird.org/api/keygen>   |
 | `HHO_API_KEY`      | 仅带 `--image` 时需要 | 懂鸟视觉鉴种（免费额度约 50 次，省着用） | <https://ai.open.hhodata.com/>   |
 
 **跑一条**（记得从仓库根、用 venv 的 python）：
@@ -164,7 +165,8 @@ python -m vibirding "水元公园一只小鸟腹部橙红抖尾" --image bird.jp
 
 - **用户指定种名时不必然做季节核验**：如"7 月的红嘴鸥"（反常）——模型可能直接采信用户种名而不调 range_check 标 `season_unusual`（eval t04）。
 - **模糊量词不估值**："十几只 / 几只"这类会被留空，不折算成整数（eval t02）。
-- **v1 是单条笔记 → 单条记录**：一次一句、一条 Observation；一篇笔记含多条记录的**批量**属未来切片。
+- **正式 CLI 仍是单条笔记 → 单条记录**：批量文本、照片预处理和 dry-run 匹配服务已经完成，
+  但要等 2.4 确认写入和第 3 步 API/UI 后才成为用户入口。
 - **read_log 起步为空**：个人历史要攒；起步阶段鉴种主力是 bird_id + range_check。
 - **懂鸟免费额度约 50 次**：带图鉴种省着用。
 
@@ -178,6 +180,7 @@ vibirding/          # 主包：cli 入口 + 循环 + 工具 + 记忆 + harness +
 ├── agent/          #   loop.py 回合循环 · prompt.py 系统提示
 ├── tools/          #   registry + read_log/range_check/bird_id/append_log
 ├── db/             #   SQLAlchemy session / ORM / repository
+├── services/       #   文本拆分、照片预处理、物种名录、dry-run 匹配
 ├── memory/         #   log.py：保持 v1 append/query 外观
 ├── harness/        #   permissions / budget / trace
 └── llm/            #   deepseek_client（运行时）· mock（离线）· client（Gemini 备用）
@@ -193,8 +196,8 @@ docker-compose.yml  # 本地 PostgreSQL 服务
 
 ## v2 后续计划
 
-- **2.1 文本拆分**：一篇笔记拆成多个草稿，共享地点和日期下发。
-- **2.2–2.5 批量与匹配**：照片预处理、物种名录、按 `species_id` 匹配、批量确认写入。
+- **2.1–2.3 已完成待本轮 review**：文本拆分、照片预处理、物种名录与 dry-run 匹配。
+- **2.4–2.5**：批量确认写入、未匹配照片自动生成记录。
 - **3 Web**：FastAPI API、React 输入预览页和记录管理页。
 
 完整范围与切片顺序见 [docs/architecture.md](docs/architecture.md) §10。

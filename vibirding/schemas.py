@@ -149,6 +149,99 @@ class PhotoIdentification(BaseModel):
     warning: str | None = None
 
 
+class SpeciesCatalogEntry(BaseModel):
+    """One provider-backed species row ready for catalog import."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    taxonomy_source: str
+    taxonomy_key: str
+    canonical_chinese_name: str
+    scientific_name: str | None = None
+    aliases: list[str] = Field(default_factory=list)
+
+    @field_validator("taxonomy_source", "taxonomy_key", "canonical_chinese_name")
+    @classmethod
+    def required_text_must_not_be_blank(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError("required taxonomy text must not be blank")
+        return value
+
+    @field_validator("scientific_name")
+    @classmethod
+    def optional_text_is_trimmed(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        value = value.strip()
+        return value or None
+
+
+class SpeciesRecord(SpeciesCatalogEntry):
+    """A species catalog row with its stable internal UUID."""
+
+    id: UUID
+
+
+class SpeciesLookup(BaseModel):
+    """Names available when resolving text or a photo candidate."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    species_label: str | None = None
+    scientific_name: str | None = None
+
+
+class TaxonomyResolution(BaseModel):
+    """Explainable result of resolving names to one internal species ID."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    status: Literal["resolved", "unmapped", "ambiguous"]
+    species_id: UUID | None = None
+    matched_by: Literal["scientific_name", "canonical_name", "alias"] | None = None
+    candidate_species_ids: list[UUID] = Field(default_factory=list)
+    warning: str | None = None
+
+
+class DraftSpeciesResolution(BaseModel):
+    """Taxonomy resolution for one immutable input draft."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    client_draft_id: str
+    resolution: TaxonomyResolution
+
+
+class PhotoMatchPlan(BaseModel):
+    """Dry-run disposition for one photo, without mutating a draft."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    photo_id: UUID
+    resolution: TaxonomyResolution | None = None
+    status: Literal[
+        "matched",
+        "unmatched",
+        "ambiguous",
+        "unmapped",
+        "unrecognized",
+        "failed",
+    ]
+    client_draft_id: str | None = None
+    warning: str | None = None
+
+
+class DryRunMatchPlan(BaseModel):
+    """Complete explainable matching plan produced without observation writes."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    drafts: list[DraftSpeciesResolution]
+    photos: list[PhotoMatchPlan]
+    warnings: list[str] = Field(default_factory=list)
+
+
 class TraceEvent(BaseModel):
     """One line logged per loop step (observability)."""
 

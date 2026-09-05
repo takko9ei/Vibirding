@@ -34,6 +34,8 @@ EBIRD_BACK_DAYS = 14  # look-back window, days (eBird range 1..30)
 # Sent as the obs endpoint's `sppLocale` param (NOT `locale`, which obs endpoints
 # ignore). "zh_SIM" -> Simplified Chinese common names; "zh" -> Traditional.
 EBIRD_SPP_LOCALE = "zh_SIM"
+EBIRD_TAXONOMY_LOCALE = "zh_SIM"
+EBIRD_TAXONOMY_TIMEOUT_S = 30
 
 # --- 懂鸟/hholove visual bird-ID API (used by the bird_id tool) ---
 # Async two-step + polling; all requests POST to {BASE_URL}{PATH} as multipart

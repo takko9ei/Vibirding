@@ -6,10 +6,11 @@ import uuid
 from datetime import datetime
 
 from sqlalchemy import Select, select
+from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
 
-from ..schemas import Observation
-from .models import ObservationRow
+from ..schemas import Observation, SpeciesCatalogEntry, SpeciesRecord
+from .models import ObservationRow, SpeciesRow
 
 
 class ObservationRepository:
@@ -61,6 +62,62 @@ class ObservationRepository:
         return [_to_observation(row) for row in rows]
 
 
+class SpeciesRepository:
+    """Read and idempotently update the provider-backed species catalog."""
+
+    def __init__(self, session: Session) -> None:
+        self._session = session
+
+    def upsert_many(
+        self,
+        entries: list[SpeciesCatalogEntry],
+        batch_size: int = 500,
+    ) -> list[SpeciesRecord]:
+        """Bulk upsert catalog rows while preserving IDs on provider updates."""
+        records_by_key: dict[tuple[str, str], SpeciesRecord] = {}
+        for start in range(0, len(entries), batch_size):
+            batch = entries[start : start + batch_size]
+            values = [
+                {
+                    "id": uuid.uuid4(),
+                    "taxonomy_source": entry.taxonomy_source,
+                    "taxonomy_key": entry.taxonomy_key,
+                    "canonical_chinese_name": entry.canonical_chinese_name,
+                    "scientific_name": entry.scientific_name,
+                    "aliases": list(entry.aliases),
+                }
+                for entry in batch
+            ]
+            statement = insert(SpeciesRow).values(values)
+            statement = statement.on_conflict_do_update(
+                constraint="uq_species_source_key",
+                set_={
+                    "canonical_chinese_name": statement.excluded.canonical_chinese_name,
+                    "scientific_name": statement.excluded.scientific_name,
+                    "aliases": statement.excluded.aliases,
+                },
+            ).returning(SpeciesRow)
+            rows = self._session.scalars(statement).all()
+            for row in rows:
+                record = _to_species(row)
+                records_by_key[
+                    (record.taxonomy_source, record.taxonomy_key)
+                ] = record
+
+        return [
+            records_by_key[(entry.taxonomy_source, entry.taxonomy_key)]
+            for entry in entries
+        ]
+
+    def list_all(self) -> list[SpeciesRecord]:
+        rows = self._session.scalars(
+            select(SpeciesRow).order_by(
+                SpeciesRow.taxonomy_source, SpeciesRow.taxonomy_key
+            )
+        ).all()
+        return [_to_species(row) for row in rows]
+
+
 def _apply_date_range(
     statement: Select[tuple[ObservationRow]],
     date_range: str | None,
@@ -98,4 +155,15 @@ def _to_observation(row: ObservationRow) -> Observation:
         confidence=row.confidence,
         source=row.source,
         flags=list(row.flags),
+    )
+
+
+def _to_species(row: SpeciesRow) -> SpeciesRecord:
+    return SpeciesRecord(
+        id=row.id,
+        taxonomy_source=row.taxonomy_source,
+        taxonomy_key=row.taxonomy_key,
+        canonical_chinese_name=row.canonical_chinese_name,
+        scientific_name=row.scientific_name,
+        aliases=list(row.aliases),
     )

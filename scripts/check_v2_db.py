@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-"""Verify the initial Alembic migration in a disposable PostgreSQL schema."""
+"""Verify the full Alembic migration chain in a disposable PostgreSQL schema."""
 
 from __future__ import annotations
 
@@ -28,7 +28,11 @@ from vibirding.db.session import build_engine  # noqa: E402
 EXPECTED_COLUMNS = {
     "id", "sequence_no", "timestamp", "place", "obs_date", "time_of_day",
     "species", "count", "behavior", "raw_note", "confidence", "source",
-    "flags", "user_id",
+    "flags", "user_id", "species_id",
+}
+EXPECTED_SPECIES_COLUMNS = {
+    "id", "canonical_chinese_name", "scientific_name", "taxonomy_source",
+    "taxonomy_key", "aliases",
 }
 
 
@@ -66,24 +70,54 @@ def main() -> int:
         inspector = inspect(test_engine)
         tables = set(inspector.get_table_names())
         columns = {column["name"]: column for column in inspector.get_columns("observations")}
+        species_columns = {
+            column["name"]: column for column in inspector.get_columns("species")
+        }
         orm_columns = set(Base.metadata.tables["observations"].columns.keys())
+        orm_species_columns = set(Base.metadata.tables["species"].columns.keys())
         with test_engine.connect() as connection:
             revision = connection.execute(text("SELECT version_num FROM alembic_version")).scalar_one()
 
-        check("migration 到达 0001 head", revision == "0001", str(revision))
+        check("migration 到达 0002 head", revision == "0002", str(revision))
         check("创建 observations 表", "observations" in tables, str(tables))
+        check("创建 species 表", "species" in tables, str(tables))
         check("migration 列集合正确", set(columns) == EXPECTED_COLUMNS, str(set(columns)))
         check("migration 与 ORM 列一致", set(columns) == orm_columns, str(orm_columns))
+        check(
+            "species migration 列集合正确",
+            set(species_columns) == EXPECTED_SPECIES_COLUMNS,
+            str(set(species_columns)),
+        )
+        check(
+            "species migration 与 ORM 列一致",
+            set(species_columns) == orm_species_columns,
+            str(orm_species_columns),
+        )
         check("id 使用 UUID", columns["id"]["type"].__class__.__name__ == "UUID")
         check("flags 使用 JSONB", columns["flags"]["type"].__class__.__name__ == "JSONB")
         check("flags 默认空 JSONB", "[]" in str(columns["flags"].get("default")))
         check("sequence_no 是 identity", columns["sequence_no"].get("identity") is not None)
         check("raw_note/source 非空",
               not columns["raw_note"]["nullable"] and not columns["source"]["nullable"])
+        check("species.aliases 使用 JSONB", species_columns["aliases"]["type"].__class__.__name__ == "JSONB")
+        check("observations.species_id 可空", columns["species_id"]["nullable"] is True)
+        foreign_keys = inspector.get_foreign_keys("observations")
+        species_fk = next(
+            (fk for fk in foreign_keys if fk["constrained_columns"] == ["species_id"]),
+            None,
+        )
+        check(
+            "species_id 外键 ON DELETE SET NULL",
+            species_fk is not None
+            and species_fk["referred_table"] == "species"
+            and species_fk.get("options", {}).get("ondelete") == "SET NULL",
+            str(species_fk),
+        )
 
         command.downgrade(alembic_config, "base")
         inspector = inspect(test_engine)
-        check("downgrade 删除 observations", "observations" not in inspector.get_table_names())
+        remaining = set(inspector.get_table_names())
+        check("downgrade 删除 observations/species", not {"observations", "species"} & remaining, str(remaining))
         test_engine.dispose()
     finally:
         if old_url is None:
