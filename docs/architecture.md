@@ -14,10 +14,10 @@
 **当前代码状态是 v2 第 1 步已完成。** PostgreSQL、SQLAlchemy、Alembic 和 psycopg 3
 已经替换 JSONL 持久化，并保留 v1 单条 CLI、工具契约与离线 eval 基线。
 
-**当前切片 2.1 文本拆分已实现，正在等待 review/commit。** 它只把一篇自然语言笔记
-拆成多个 `DraftObservation`，并把共享地点、日期、时段下发到每条草稿。本轮不得继续
-引入照片处理、物种名录与 `species_id` 映射、图文匹配、批量写库、FastAPI 或 React；
-文本拆分服务不写 observations。review 前不开始 2.2。
+**2.1 文本拆分已完成并提交。2.2 照片预处理已实现，正在等待 review/commit。** 本切片
+批量调用现有懂鸟适配器，将每张照片的第一候选整理为结构化 `PhotoIdentification`。
+本轮不得继续引入物种名录与 `species_id` 映射、图文匹配、媒体/批量写库、FastAPI 或
+React；照片预处理不写 observations，也不保存或改名照片。review 前不开始 2.3。
 
 **不迁移旧数据。** v1 真实 `data/` 为空；这次是 schema migration，不是数据 migration。
 
@@ -111,7 +111,7 @@ Vibirding/
 ├── migrations/                           # 第 1 步：数据库迁移
 ├── media/                                # 后续：gitignore，内容哈希文件名
 ├── vibirding/
-│   ├── schemas.py                        # v1 兼容模型 + 第 2.1 步草稿模型
+│   ├── schemas.py                        # v1 兼容模型 + 第 2.1/2.2 步批量模型
 │   ├── config.py                         # 路径、模型、外部 API、数据库配置
 │   ├── db/                               # 第 1 步
 │   │   ├── session.py                    # engine / session factory / 注入点
@@ -123,7 +123,7 @@ Vibirding/
 │   ├── llm/                              # 继承：DeepSeekClient / MockClient
 │   ├── harness/                          # 继承：permissions / budget / trace
 │   ├── tools/                            # 继承并后续扩展批量能力
-│   ├── services/                         # 第 2.1 步 parse；后续 media / matching / taxonomy
+│   ├── services/                         # 第 2.1/2.2 步 parse；后续 media / matching / taxonomy
 │   └── api/                              # 后续：FastAPI app、路由和依赖
 ├── frontend/                             # 后续：React 应用
 ├── evals/                                # 保留 v1 eval，后续新增 v2 用例
@@ -183,6 +183,32 @@ ParseResult
 同种多张照片全部归属同一条 DraftObservation；一张照片多鸟时只使用懂鸟第一候选；
 文本数量优先于照片张数。
 
+第 2.2 步新增以下结构；`photo_id` 由调用方提供，本切片不负责创建或持久化媒体记录：
+
+```text
+PhotoInput
+  photo_id: UUID
+  image_path: str
+
+BirdIdCandidate
+  species_label: str               # 懂鸟名称字段的中文名首段
+  english_name: str | None
+  scientific_name: str | None
+  confidence: float                # 懂鸟原始 0~100 百分制
+  provider_candidate_id: str | None
+
+BirdIdResult
+  status: "identified" | "unrecognized" | "failed"
+  targets: list[list[BirdIdCandidate]]
+  message: str | None
+
+PhotoIdentification
+  photo_id: UUID
+  candidate: BirdIdCandidate | None # 只取第一目标的第一候选
+  status: "identified" | "unrecognized" | "failed"
+  warning: str | None
+```
+
 ### 4.3 PostgreSQL 表设计
 
 第 1 步只创建 `observations` 及数据库基础设施。`species`、`sessions`、`photos` 及关系表
@@ -226,7 +252,8 @@ ParseResult
 | `db/repository.py` | 查询和持久化语义；不格式化给模型看的文本。 |
 | `services/taxonomy.py` | 后续：名录导入、别名/外部结果到内部 `species_id` 的映射。 |
 | `services/media.py` | 后续：内容哈希、去重、文件落盘和元数据。 |
-| `services/parse.py` | 第 2.1 步：文本拆分与草稿构造；后续再编排照片识别。解析阶段不写 observations。 |
+| `services/parse.py` | 第 2.1/2.2 步：文本拆分、照片预处理与草稿构造；解析阶段不写 observations。 |
+| `tools/bird_id.py` | 保留 v1 `run()` 文本工具契约，并提供结构化 `identify()` 给批处理服务复用。 |
 | `services/matching.py` | 后续：按 `species_id` 关联图文，输出可解释的匹配结果。 |
 | `api/` | 后续：FastAPI 输入验证、依赖注入、HTTP 状态码和响应；不直接嵌入业务 SQL。 |
 | `frontend/` | 后续：输入预览确认和记录管理；不重复后端规则。 |
@@ -289,7 +316,26 @@ TextSplitService.split(
 - 空白输入、缺少/重复返回工具调用、错误工具名、空 observations 或不符合 schema 的参数
   都抛出 `TextSplitError`，不返回看似成功的部分结果。
 
-### 6.4 HTTP API 契约（后续第 3 步）
+### 6.4 第 2.2 步照片预处理契约
+
+```python
+BirdIdTool.identify(image_path: str) -> BirdIdResult
+PhotoPreprocessService.preprocess(
+    photos: list[PhotoInput],
+) -> list[PhotoIdentification]
+```
+
+- `BirdIdTool.identify()` 复用现有图片预检、上传和轮询逻辑，直接返回结构化候选；旧的
+  `run()` 继续输出给模型阅读的中文文本，不改变工具名、schema、risk 或成功/失败语义。
+- 每个懂鸟目标最多保留前三个候选，并将 `中文名|英文名|拉丁名` 拆成独立字段；置信度保留
+  懂鸟原始 0~100 百分制，不换算成 0~1。
+- 批处理保持输入顺序且每张照片恰有一个结果。一张照片检测出多只鸟时，只取第一目标的
+  第一候选；其他候选只停留在 adapter 结果中，不进入自动匹配输入。
+- 单张照片失败不得中止其他照片：传输/结构错误输出 `failed + warning`；正常返回但未识别出
+  候选输出 `unrecognized + warning`。重复 `photo_id` 整批拒绝，空输入返回空列表。
+- 本切片不调用 LLM、不做 taxonomy 映射、不匹配文本、不访问数据库，也不创建/复制/改名照片。
+
+### 6.5 HTTP API 契约（后续第 3 步）
 
 ```text
 POST   /api/media

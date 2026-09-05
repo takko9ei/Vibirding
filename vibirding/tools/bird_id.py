@@ -10,13 +10,14 @@ The 懂鸟 API is ASYNC two-step + polling, and its responses are ARRAYS, not di
                                                     1001 => not ready, retry
                                                     1008 => nothing detected
                                                     1009 => detected but unknown
-All of that async complexity is fully wrapped inside run(): the loop and the model
-only ever see ONE normalized ToolResult, never the polling.
+All of that async complexity is wrapped inside identify(); run() formats its
+structured result so the loop and the model still see ONE normalized ToolResult,
+never the polling.
 
-Every failure mode is normalized inside run() — missing key / no file / >2MB /
-upload timeout / non-1000 / poll timeout / 1008-1009 / network / malformed
-structure — so a raw exception never escapes into the agent loop (we do NOT rely
-on the registry's blanket backstop for the known cases; that was the S3 lesson).
+Every known failure mode is normalized inside identify() — missing key / no file /
+>2MB / upload timeout / non-1000 / poll timeout / 1008-1009 / network / malformed
+structure — and run() translates that result without leaking a raw exception into
+the agent loop (we do NOT rely on the registry's blanket backstop for known cases).
 "1008/1009 (not recognized)" is a LEGITIMATE outcome -> ok=True with guidance text,
 mirroring range_check's "unknown place / empty list" semantics.
 
@@ -34,7 +35,7 @@ import httpx
 from pydantic import BaseModel
 
 from .. import config
-from ..schemas import ToolResult
+from ..schemas import BirdIdCandidate, BirdIdResult, ToolResult
 from .failures import tool_failure
 from .registry import ToolContext
 
@@ -90,44 +91,60 @@ class BirdIdTool:
     schema = BirdIdInput
     risk = "read"
 
-    def run(self, input: dict, ctx: ToolContext) -> ToolResult:
-        image_path = input.get("image_path", "")
-
-        # 1. local precheck (cheap; avoids a pointless upload). ok=False on failure.
+    def identify(self, image_path: str) -> BirdIdResult:
+        """Return structured candidates while normalizing all known failures."""
         err = _check_image(image_path)
         if err is not None:
-            return ToolResult(ok=False, output=tool_failure("bird_id", err, _FALLBACK))
+            return BirdIdResult(status="failed", message=err)
 
-        # 2. need the API key; missing key is a real failure.
         key = config.load_hho_api_key()
         if not key:
-            return ToolResult(
-                ok=False,
-                output=tool_failure(
-                    "bird_id",
-                    "HHO_API_KEY 未设置：请在项目根 .env 写入 HHO_API_KEY=<your-key>。",
-                    _FALLBACK,
+            return BirdIdResult(
+                status="failed",
+                message=(
+                    "HHO_API_KEY 未设置：请在项目根 .env 写入 "
+                    "HHO_API_KEY=<your-key>。"
                 ),
             )
 
-        # 3. upload -> poll -> format, normalizing EVERY failure here (no bare stack).
-        #    _upload/_poll convert httpx + structure errors into _HhoError, and 1008/
-        #    1009 into _Unrecognized; the final (Key/Index/Type/Value)Error clause is
-        #    a custom-message net for malformed rows during formatting.
         try:
             result_id = _upload(image_path, key)
-            targets = _poll(result_id, key)
-            output = _format_candidates(targets)
-        except _Unrecognized as e:
-            return ToolResult(ok=True, output=str(e))
-        except _HhoError as e:
-            return ToolResult(ok=False, output=tool_failure("bird_id", str(e), _FALLBACK))
-        except (KeyError, IndexError, TypeError, ValueError) as e:
+            raw_targets = _poll(result_id, key)
+            targets = _parse_candidates(raw_targets)
+        except _Unrecognized as exc:
+            return BirdIdResult(status="unrecognized", message=str(exc))
+        except _HhoError as exc:
+            return BirdIdResult(status="failed", message=str(exc))
+        except (KeyError, IndexError, TypeError, ValueError) as exc:
+            return BirdIdResult(
+                status="failed",
+                message=f"懂鸟返回结构异常，无法解析候选：{exc}",
+            )
+
+        if not any(targets):
+            return BirdIdResult(
+                status="unrecognized",
+                targets=targets,
+                message="懂鸟检测到目标但没有给出候选种。",
+            )
+        return BirdIdResult(status="identified", targets=targets)
+
+    def run(self, input: dict, ctx: ToolContext) -> ToolResult:
+        image_path = input.get("image_path", "")
+        result = self.identify(image_path)
+        if result.status == "failed":
             return ToolResult(
                 ok=False,
-                output=tool_failure("bird_id", f"懂鸟返回结构异常，无法解析候选：{e}", _FALLBACK),
+                output=tool_failure(
+                    "bird_id", result.message or "未知识别错误。", _FALLBACK
+                ),
             )
-        return ToolResult(ok=True, output=output)
+        if result.status == "unrecognized":
+            return ToolResult(
+                ok=True,
+                output=result.message or "懂鸟未能识别这张图片里的鸟种。",
+            )
+        return ToolResult(ok=True, output=_format_structured_candidates(result.targets))
 
 
 # ── helpers ──────────────────────────────────────────────────────────────────
@@ -244,6 +261,61 @@ def _poll(result_id: str, key: str) -> list:
     )
 
 
+def _parse_candidates(
+    targets: list, top: int = _TOP_CANDIDATES
+) -> list[list[BirdIdCandidate]]:
+    """Normalize provider rows while preserving target and candidate order."""
+    parsed_targets: list[list[BirdIdCandidate]] = []
+    for target in targets:
+        if not isinstance(target, dict):
+            raise TypeError("target is not an object")
+        rows = target.get("list") or []
+        if not isinstance(rows, list):
+            raise TypeError("target list is not an array")
+
+        parsed: list[BirdIdCandidate] = []
+        for row in rows[:top]:
+            if not isinstance(row, (list, tuple)) or len(row) < 2:
+                raise ValueError("candidate row must contain confidence and names")
+            raw_confidence = row[0]
+            if isinstance(raw_confidence, bool) or not isinstance(
+                raw_confidence, (int, float)
+            ):
+                raise TypeError("candidate confidence is not numeric")
+
+            confidence = float(raw_confidence)
+            if not 0 <= confidence <= 100:
+                raise ValueError("candidate confidence is outside 0..100")
+
+            name_parts = str(row[1]).split("|")
+            species_label = name_parts[0].strip()
+            if not species_label:
+                raise ValueError("candidate Chinese name is blank")
+            english_name = _optional_name(name_parts, 1)
+            scientific_name = _optional_name(name_parts, 2)
+            provider_id = (
+                str(row[2]) if len(row) > 2 and row[2] is not None else None
+            )
+            parsed.append(
+                BirdIdCandidate(
+                    species_label=species_label,
+                    english_name=english_name,
+                    scientific_name=scientific_name,
+                    confidence=confidence,
+                    provider_candidate_id=provider_id,
+                )
+            )
+        parsed_targets.append(parsed)
+    return parsed_targets
+
+
+def _optional_name(parts: list[str], index: int) -> str | None:
+    if index >= len(parts):
+        return None
+    value = parts[index].strip()
+    return value or None
+
+
 def _format_candidates(targets: list, top: int = _TOP_CANDIDATES) -> str:
     """Render top candidates (Chinese name + confidence) per detected target.
 
@@ -251,15 +323,19 @@ def _format_candidates(targets: list, top: int = _TOP_CANDIDATES) -> str:
     Confidence is 0~100 (NOT 0~1); the species field is pipe-joined, take the first
     segment (Chinese name). `list` is already sorted by confidence descending.
     """
+    return _format_structured_candidates(_parse_candidates(targets, top))
+
+
+def _format_structured_candidates(
+    targets: list[list[BirdIdCandidate]],
+) -> str:
+    """Render normalized candidates for the legacy model-facing tool output."""
     multi = len(targets) > 1
     lines: list[str] = []
-    for i, target in enumerate(targets, 1):
-        candidates = target.get("list") or []
+    for i, candidates in enumerate(targets, 1):
         parts = []
-        for row in candidates[:top]:
-            conf = row[0]  # 0~100
-            cn = str(row[1]).split("|")[0] or "?"  # 中文名|英文名|拉丁名 -> 中文名
-            parts.append(f"{cn} {conf}%")
+        for candidate in candidates:
+            parts.append(f"{candidate.species_label} {candidate.confidence}%")
         if parts:
             prefix = f"目标{i}：" if multi else ""
             lines.append(prefix + "、".join(parts))

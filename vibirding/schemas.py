@@ -10,9 +10,10 @@ All models use pydantic for validation.
 
 from __future__ import annotations
 
+from typing import Literal
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 class ToolCall(BaseModel):
@@ -96,6 +97,56 @@ class DraftObservation(BaseModel):
     flags: list[str] = Field(default_factory=list)
     photo_ids: list[UUID] = Field(default_factory=list)
     needs_confirmation: bool = False
+
+
+class PhotoInput(BaseModel):
+    """A caller-owned photo reference passed to the preprocessing slice."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    photo_id: UUID
+    image_path: str
+
+    @field_validator("image_path")
+    @classmethod
+    def image_path_must_not_be_blank(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError("image_path must not be blank")
+        return value
+
+
+class BirdIdCandidate(BaseModel):
+    """One normalized candidate returned by the visual-ID provider."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    species_label: str
+    english_name: str | None = None
+    scientific_name: str | None = None
+    confidence: float = Field(ge=0, le=100)
+    provider_candidate_id: str | None = None
+
+
+class BirdIdResult(BaseModel):
+    """Structured visual-ID adapter result, retaining candidates by target."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    status: Literal["identified", "unrecognized", "failed"]
+    targets: list[list[BirdIdCandidate]] = Field(default_factory=list)
+    message: str | None = None
+
+
+class PhotoIdentification(BaseModel):
+    """The single automatic candidate selected for one input photo."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    photo_id: UUID
+    candidate: BirdIdCandidate | None = None
+    status: Literal["identified", "unrecognized", "failed"]
+    warning: str | None = None
 
 
 class TraceEvent(BaseModel):

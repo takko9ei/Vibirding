@@ -13,7 +13,14 @@ from typing import Protocol
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 
-from ..schemas import DraftObservation, ModelResponse
+from ..schemas import (
+    BirdIdCandidate,
+    BirdIdResult,
+    DraftObservation,
+    ModelResponse,
+    PhotoIdentification,
+    PhotoInput,
+)
 
 
 RETURN_TOOL_NAME = "return_text_split"
@@ -27,6 +34,10 @@ class _CompletesMessages(Protocol):
     def complete(
         self, messages: list[dict], tools: list[dict] | None = None
     ) -> ModelResponse: ...
+
+
+class _IdentifiesBirds(Protocol):
+    def identify(self, image_path: str) -> BirdIdResult: ...
 
 
 class _SharedContext(BaseModel):
@@ -191,3 +202,60 @@ class TextSplitService:
             photo_ids=[],
             needs_confirmation=needs_confirmation,
         )
+
+
+class PhotoPreprocessError(ValueError):
+    """The caller supplied an ambiguous photo batch."""
+
+
+class PhotoPreprocessService:
+    """Convert a batch of photo references into one candidate per photo."""
+
+    def __init__(self, bird_identifier: _IdentifiesBirds) -> None:
+        self._bird_identifier = bird_identifier
+
+    def preprocess(
+        self, photos: list[PhotoInput]
+    ) -> list[PhotoIdentification]:
+        photo_ids = [photo.photo_id for photo in photos]
+        if len(set(photo_ids)) != len(photo_ids):
+            raise PhotoPreprocessError("photo_id values must be unique within a batch")
+
+        results: list[PhotoIdentification] = []
+        for photo in photos:
+            recognition = self._bird_identifier.identify(photo.image_path)
+            first_candidate = self._first_candidate(recognition)
+
+            if recognition.status == "identified" and first_candidate is not None:
+                results.append(
+                    PhotoIdentification(
+                        photo_id=photo.photo_id,
+                        candidate=first_candidate,
+                        status="identified",
+                    )
+                )
+                continue
+
+            status = (
+                "failed" if recognition.status == "failed" else "unrecognized"
+            )
+            warning = recognition.message
+            if recognition.status == "identified" and first_candidate is None:
+                status = "unrecognized"
+                warning = "懂鸟第一目标没有候选种。"
+            results.append(
+                PhotoIdentification(
+                    photo_id=photo.photo_id,
+                    status=status,
+                    warning=warning,
+                )
+            )
+        return results
+
+    @staticmethod
+    def _first_candidate(
+        recognition: BirdIdResult,
+    ) -> BirdIdCandidate | None:
+        if not recognition.targets or not recognition.targets[0]:
+            return None
+        return recognition.targets[0][0]
