@@ -1,4 +1,4 @@
-# Vibirding — Claude Code 工作区指引
+# Vibirding — Codex 工作区指引
 
 ## 项目是什么
 

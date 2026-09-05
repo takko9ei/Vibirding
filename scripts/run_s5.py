@@ -3,9 +3,9 @@
 then a query -> read_log reads the just-written record back.
 
 This is the first run where the agent PERSISTS: the model calls append_log, the
-write gate prompts you in the terminal, and on "yes" the Observation is appended
-to the real data/observations.jsonl. A second turn then asks a question so the
-model calls read_log and reads that record back from the same file.
+write gate prompts you in the terminal, and on "yes" the Observation is inserted
+into PostgreSQL. A second turn then asks a question so the model calls read_log
+and reads that record back from the same database.
 
 All four tools are registered (read_log + range_check + bird_id + append_log).
 The write gate's approver is a REAL stdin y/n/a prompt, injected here at the entry
@@ -107,7 +107,7 @@ def _turn(llm, registry, permissions, note: str, run_id: str, max_steps: int):
 
 def main() -> int:
     note = " ".join(sys.argv[1:]).strip() or DEFAULT_NOTE
-    log = Log()  # the REAL data/observations.jsonl
+    log = Log()  # the real PostgreSQL observation store
 
     # ---- wiring: all four tools; read tools + the one write tool ----
     registry = ToolManager()

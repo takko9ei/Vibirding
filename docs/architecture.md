@@ -1,378 +1,367 @@
-# Vibirding · 观鸟速记 Agent — 架构设计文档
+# Vibirding v2 · 架构设计文档
 
-> 本文档是后续 vibe coding 的**唯一事实来源**。原则：**先锁结构与接口，再写实现**。
-> 任何一次 coding session 开始前，先把这份文档发给 AI 当上下文；任何对结构/契约的改动，先改这份文档，再改代码。
+> 本文档是 v2 后续开发的**唯一事实来源**。开始任何实现前，先阅读本文、
+> `docs/SNAPSHOT-v1.md` 和 `docs/V2-REQUIREMENTS.md`；发生结构或契约变化时，
+> 先修改本文，再修改代码。
 >
-> **运行时大模型：DeepSeek**（OpenAI 兼容端点，`openai` SDK，模型 `deepseek-v4-flash`，手动函数调用）。Claude Code 只是开发工具，与运行时模型无关，二者互不影响。
+> `SNAPSHOT-v1.md` 只描述 v1 代码的真实历史现状，不是 v2 的设计规范；
+> `V2-REQUIREMENTS.md` 记录需求来源和决策过程；`DECISIONS.md` 记录取舍。
+
+---
+
+## 0. 当前阶段与边界
+
+**当前代码状态仍是 v1。** 它是单条笔记、可选一张本地图片、CLI、JSONL 存储。
+v2 的架构已在本文锁定，但尚未开始任何 v2 代码实现。
+
+**当前允许实现的下一切片：第 1 步 PostgreSQL 存储替换。** 它只替换
+`memory/log.py` 的持久化底层，必须保持 `append_log` / `read_log` 的对外契约和
+v1 离线 eval 行为不变。不得在该切片提前引入批量解析、照片持久化、物种名录、
+FastAPI 或 React。
+
+**不迁移旧数据。** v1 真实 `data/` 为空；这次是 schema migration，不是数据 migration。
 
 ---
 
 ## 1. 产品范围
 
-**一句话**：在野外随手丢一段乱糟糟的观鸟笔记（可带一张**本地照片路径** `image_path`），程序自动把它整理成结构化记录、（有照片时）调鉴种 API、对地点/季节做合理性核验、写进你的个人观鸟日志；之后还能从日志里回答查询。
+### 1.1 v2 一句话
 
-**核心流程**
+用户提交一篇可含多个物种的自然语言观鸟笔记和任意数量照片；系统拆出多条观测、
+鉴定照片、按统一物种 ID 完成图文匹配，向用户预览，获得一次确认后将成功记录、
+媒体与批次关系写入 PostgreSQL 和本地媒体库。
 
-```
-乱糟糟的笔记(+可选本地照片路径 image_path)
+产品定位：**观察记录本 + 媒体库**。
+
+### 1.2 主流程
+
+```text
+文本 + N 张照片
+      │
+      ├── POST /api/media：哈希去重并保存媒体（独立、可复用）
       │
       ▼
-  [Agent 回合]  ── 需要时调用工具 ──►  bird_id / read_log
-      │                                      │
-      │  推理出一条结构化 Observation        │
-      ▼                                      ▼
-  调 append_log(写入，需过权限闸) ──► 追加到 observations.jsonl
+POST /api/parse（只读、无持久化副作用、可重试）
+      │
+      ├── 文本拆分为 DraftObservation，共享地点/日期下发
+      ├── 每张照片经 bird_id 得到首候选与置信度
+      ├── 文本和照片均映射到 species_id
+      └── 按 species_id 匹配；未匹配照片自动生成新的照片来源草稿记录
       │
       ▼
-  给用户一段最终总结
-   （每一步都写一行 trace）
+前端预览全部草稿（含照片自动生成的记录）并允许用户调整
+      │
+      ▼
+POST /api/observations（一次确认、事务化批量写入）
+      │
+      ├── 创建 session，记录原始笔记与本批媒体
+      ├── 成功记录和照片关联落盘
+      └── 返回 created[] / failed[]，允许部分成功
 ```
 
-**做（in scope, v1）**：单 agent + 工具循环、结构化记录、鉴种 API 适配器、读/写日志、写入权限闸、步数预算、JSONL 轨迹、固定 eval 集。
+### 1.3 范围
 
-**不做（out of scope, v1）**：MCP、花哨 TUI、三套上下文压缩、会话 fork、多 provider（只留抽象接缝）、流式输出、多 agent 编排。
+**v2 做：** PostgreSQL、文件系统媒体库、批量拆分与图文匹配、物种名录与 ID、
+FastAPI、React 输入页与记录管理页、记录编辑/删除、批量预览确认、部分失败结果。
 
-> **重要的右尺寸判断**：你单条笔记的对话很短（一句话 → 几次工具调用），**根本不会撑爆上下文**，所以 v1 不需要任何压缩机制，只需 `max_steps` 兜底。别把 MiniCode 为"通用编码助手"付的税也背上。
+**v2 暂不做：** 用户认证与授权（仅预留 `user_id`）、跨提交对话上下文、流式输出、
+取消执行、异步 job 队列、多 agent 编排、多 provider 产品化。`/api/parse` 当前同步执行；
+其响应结构要预留未来 job 语义，但当前不建立队列。
 
 ---
 
-## 2. 设计原则（借鉴 MiniCode，砍到个人级）
+## 2. 设计原则
 
-1. **循环优先**：系统围绕 `model → tool → model` 这一个回合循环组织。
-2. **工具即协议**：所有工具走同一套"注册 → schema 校验 → 执行 → 归一化 `{ok, output}`"。
-3. **权限在执行路径内**：写入类操作（`append_log`）在真正执行前必须过闸，不是事后补。
-4. **记忆是 append-only 文件**：观鸟日志就是一个只追加的 JSONL，永不改写历史行。
-5. **可观测性内建**：每一步都落一行结构化 trace，既是 debug 工具也是面试 demo。
-6. **eval 是项目的一部分**：固定测试集 + 通过率，不是"我试了下好像行"。
-7. **provider 中立**：循环/工具/记忆/eval 全部只认内部归一化类型，不认 DeepSeek/OpenAI 的原生形状；所有 provider 特有的东西封死在 `llm/deepseek_client.py` 一个文件里。
+1. **文档和切片优先**：一次只实现一个可独立验收的切片；每个切片先更新本文、
+   再实现、离线自检、review、commit。
+2. **副作用分离**：上传、解析预览、确认写入是独立能力。`/api/parse` 不写 observations，
+   可安全重试；写入只能由确认后的 `POST /api/observations` 触发。
+3. **权限在执行路径内**：v1 的写入闸不后移为 UI 提示。CLI 工具路径保留 registry 内的
+   write gate；Web 用“预览 → 明确确认请求 → 写入”表达同一授权边界。
+4. **稳定 ID，而非名称猜测**：物种展示名可变、可有别名；文本和图片只在同一
+   `species_id` 下自动匹配。映射失败必须可见，不能静默退化为字符串严格匹配。
+5. **媒体与数据库各司其职**：照片二进制在 `media/`，以内容哈希命名；数据库保存元数据、
+   鉴定与关系。不得按物种名二次改名。
+6. **兼容优先的地基替换**：第 1 步只改存储；旧的 `Log.append/query`、工具输入输出、
+   MockClient 路径和离线 13/13 基线均不得退化。
+7. **显式事务与可观测性**：数据库写入用事务；批量操作逐条汇报成功或失败；保留结构化 trace。
+8. **API 是能力，不是页面拼装**：按资源和操作设计，前端只是消费者；普通列表查询直接读 API，
+   不经 LLM 复述。
 
 ---
 
-## 3. 目录结构
+## 3. 目标目录结构
 
-```
+以下是 v2 完成态；标记“后续”者不得在第 1 步提前实现。
+
+```text
 Vibirding/
+├── CLAUDE.md
+├── DECISIONS.md
 ├── README.md
-├── DECISIONS.md                 # 每个取舍记三行 ← 面试逐字稿
 ├── requirements.txt
-├── .env.example                 # 三把 key 占位(DEEPSEEK_/EBIRD_/HHO_API_KEY)，复制成 .env 再填；绝不含真实值
-├── vibirding/                    # 主包（可导入的 Python 包，小写）
-│   ├── __init__.py
-│   ├── config.py                # 路径、模型名(deepseek-v4-flash)、base_url、从 .env 读 DEEPSEEK_API_KEY
-│   ├── schemas.py               # ★所有数据结构(pydantic)，最先锁
-│   ├── llm/
-│   │   ├── deepseek_client.py   # 运行时客户端：DeepSeekClient(openai SDK, OpenAI 兼容)
-│   │   ├── client.py            # 备用 provider：GeminiClient(google-genai)（保留）
-│   │   └── mock.py              # 脚本化假模型，离线测循环 & 跑 eval
-│   ├── agent/
-│   │   ├── loop.py              # run_agent_turn()：手动循环+预算+容错
-│   │   └── prompt.py            # system prompt(静态常量) + today_hint()：运行时日期锚点，入口层组装 messages 时拼入
-│   ├── tools/
-│   │   ├── registry.py          # ToolManager：注册/校验/执行/归一化
-│   │   ├── bird_id.py           # 鉴种 API 适配器（可替换）
-│   │   ├── range_check.py       # ★季节/分布核验适配器（eBird）
-│   │   ├── log_read.py          # read_log 工具（只读）
-│   │   └── log_write.py         # append_log 工具（写入，过闸）
+├── docker-compose.yml                    # 第 1 步：本地 PostgreSQL
+├── alembic.ini                           # 第 1 步：Alembic 配置
+├── .env.example                          # 增加 DATABASE_URL 等非敏感占位
+├── docs/
+│   ├── architecture.md                   # 本文，唯一事实来源
+│   ├── SNAPSHOT-v1.md                    # v1 历史事实快照
+│   ├── V2-REQUIREMENTS.md                # 需求与已拍板决定
+│   └── STATUS.md
+├── migrations/                           # 第 1 步：数据库迁移
+├── media/                                # 后续：gitignore，内容哈希文件名
+├── vibirding/
+│   ├── schemas.py                        # v1 兼容模型 + v2 API/草稿模型
+│   ├── config.py                         # 路径、模型、外部 API、数据库配置
+│   ├── db/                               # 第 1 步
+│   │   ├── session.py                    # engine / session factory / 注入点
+│   │   ├── models.py                     # SQLAlchemy ORM 映射
+│   │   └── repository.py                 # ObservationRepository 等数据访问
 │   ├── memory/
-│   │   └── log.py               # append-only JSONL 日志：append() / query()
-│   ├── harness/
-│   │   ├── permissions.py       # 风险分级 + 写入审批
-│   │   ├── budget.py            # 步数/token 预算 + 停止原因
-│   │   └── trace.py             # JSONL 轨迹写入器
-│   ├── cli.py                   # 交付级入口：注册四工具→跑 agent→展示；记录/查询两用；--image/--yes/--verbose；入口层拼 SYSTEM_PROMPT+today_hint()+意图路由前言
-│   └── __main__.py              # 使 `python -m vibirding` 可用：调 cli.main()
-├── evals/
-│   ├── tasks.yaml               # 固定用例（题目：input_note/image_path，无答案）
-│   ├── answers.yaml             # 固定用例（答案：expected，独立文件防泄题）
-│   ├── run_evals.py             # 跑 agent、打分、出通过率（--offline 默认 / --online）
-│   └── REPORT.md                # eval 首跑报告（结果 + FAIL 归因 + 复现）
-├── scripts/                     # 开发期临时冒烟测试脚本（如 run_s1.py），不属于最终交付结构
-└── data/                        # gitignore：日志、轨迹
-    ├── observations.jsonl
-    └── traces/
-```
-
-> **注（S8 / cli 入口层组装）**：`cli.py` 组装 messages 时，system 内容按顺序拼接 `SYSTEM_PROMPT`（静态常量，**不变**）+ `today_hint()` + **意图路由前言**——让模型先判断这是「记录新观测」还是「查询历史」：查询则只调 `read_log` 直接作答、**不写盘**。这是**入口层组装**（与 `today_hint()` 同一手法），`SYSTEM_PROMPT` 常量与四个工具的行为均不改动。记录/查询由模型据此自判，CLI 不设子命令。
-
----
-
-## 4. 核心数据结构（`schemas.py`，**最先锁这一个文件**）
-
-> 这些是整个系统的"血型"，**完全 provider 中立**。先定死它们，多 agent、记忆、eval 才能干净地插进来。用 pydantic。
-
-**ToolCall** — 模型发出的一个工具请求
-
-```
-id: str            # 配对用，对应 tool_result（OpenAI 的 tool_call.id 映射到这里）
-name: str          # 工具名
-input: dict        # 模型填的参数（OpenAI 的 tool_call.function.arguments(JSON 字符串)解析后映射到这里）
-```
-
-**ToolResult** — 工具执行后的归一化返回（**所有工具都返回这个形状**）
-
-```
-ok: bool           # 成功 / 失败
-output: str        # 给模型看的文本（结果或错误信息）
-```
-
-**ModelResponse** — `llm/client` 归一化后的模型响应（屏蔽 provider 差异；这是循环唯一认识的形状）
-
-```
-text: str | None              # 文字答案（最终答案或中间话）
-tool_calls: list[ToolCall]    # 模型这一轮想调的工具（可能为空）
-stop_reason: str              # ★内部归一化值: "tool_use" | "end_turn" | "max_tokens" | ...
-                              #   DeepSeekClient 负责把"响应里有没有 tool_calls / OpenAI 的
-                              #   finish_reason"映射成这些内部值（finish_reason 取值如 stop/length/tool_calls）
-usage: dict | None            # 归一化用量 {input_tokens, output_tokens}
-                              #   由 DeepSeekClient 从 OpenAI 的 usage(prompt_tokens/completion_tokens) 映射而来
-```
-
-**Observation** — 写进日志的一条观测记录（**这是 agent 的最终产物**）
-
-```
-id: str
-timestamp: str                # ISO 时间
-place: str | None
-obs_date: str | None          # 观测日期
-time_of_day: str | None       # 上午/黄昏...
-species: str | None           # 鉴定出的种；不确定可为 None
-count: int | None
-behavior: str | None
-raw_note: str                 # 原始乱笔记，永远保留
-confidence: float | None      # 来自 bird_id 或模型自评
-source: str                   # "user" | "bird_id" | "inferred" | "manual"
-flags: list[str]              # 如 ["season_unusual", "low_confidence"]
-```
-
-**TraceEvent** — 每个循环步骤落一行（可观测性）
-
-```
-step: int
-timestamp: str
-kind: str          # "model_call" | "tool_call" | "tool_result" | "final" | "budget_stop"
-summary: str       # 一句话人读
-detail: dict       # tool 名、input 预览、output 预览、stop_reason、usage
+│   │   └── log.py                        # Log 兼容外观，底层改为 PostgreSQL
+│   ├── agent/                            # 继承：loop.py / prompt.py
+│   ├── llm/                              # 继承：DeepSeekClient / MockClient
+│   ├── harness/                          # 继承：permissions / budget / trace
+│   ├── tools/                            # 继承并后续扩展批量能力
+│   ├── services/                         # 后续：media / parse / matching / taxonomy
+│   └── api/                              # 后续：FastAPI app、路由和依赖
+├── frontend/                             # 后续：React 应用
+├── evals/                                # 保留 v1 eval，后续新增 v2 用例
+└── scripts/                              # 开发期自检与冒烟脚本
 ```
 
 ---
 
-## 5. 模块职责 + 对应 MiniCode 模式
+## 4. 数据模型
 
-| 模块                                     | 职责                                                            | 对应 MiniCode                                                                                                                                           |
-| ---------------------------------------- | --------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `agent/loop.py`                          | `model→tool→model` 回合循环；步数上限；工具报错计数；空响应重试 | `src/agent-loop.ts`                                                                                                                                     |
-| `tools/registry.py`                      | 统一工具契约：find → 校验 → 执行 → `{ok,output}`                | `src/tool.ts`                                                                                                                                           |
-| `harness/permissions.py`                 | 写入类工具执行前审批；记住"本回合一直允许"                      | `src/permissions.ts`                                                                                                                                    |
-| `memory/log.py`                          | append-only JSONL 观测日志                                      | `src/session.ts`                                                                                                                                        |
-| `harness/trace.py`                       | 结构化轨迹                                                      | （MiniCode 散在 TUI；你独立成模块更清晰）                                                                                                               |
-| `harness/budget.py`                      | 预算与停止条件                                                  | `agent-loop.ts` 里的 `maxSteps`                                                                                                                         |
-| `llm/deepseek_client.py` + `llm/mock.py` | 模型适配（实现为 **DeepSeekClient**，走 openai SDK）+ 离线 mock | MiniCode 对应 `src/anthropic-adapter.ts` + `src/mock-model.ts`（注：那是 MiniCode 用 Anthropic 的文件名；我们这边换成 DeepSeek，OpenAI 兼容，结构同构） |
+### 4.1 v1 兼容 Observation
+
+在第 1 步，工具与 agent 仍以如下兼容形状读写一条观测：
+
+```text
+Observation
+  id: str                         # DB 原生 UUID 序列化为字符串；不再截断为 8 位
+  timestamp: str                  # UTC ISO 8601；DB 使用 timestamptz
+  place: str | None
+  obs_date: str | None            # 第 1 步保持字符串，避免改变 v1 输入语义
+  time_of_day: str | None
+  species: str | None             # 兼容展示字段；第 2 步起同时关联 species_id
+  count: int | None
+  behavior: str | None
+  raw_note: str
+  confidence: float | None
+  source: str
+  flags: list[str]
+```
+
+`AppendLogInput` 仍是 Observation 去掉 `id` / `timestamp` 后的单条输入；
+`raw_note` 与 `source` 必填。第 1 步不能收紧 `source`、`flags`、`obs_date` 的 v1 校验。
+
+### 4.2 批量草稿模型（后续第 2 步）
+
+```text
+DraftObservation
+  client_draft_id: str
+  place / obs_date / time_of_day / count / behavior / raw_note
+  species_label: str | None        # 展示给用户的名称
+  species_id: UUID | None          # 规范化后的匹配键
+  confidence / source / flags
+  photo_ids: list[UUID]
+  needs_confirmation: bool         # 无法规范化、冲突等需用户决定
+
+ParseResult
+  draft_observations: list[DraftObservation]
+  unmatched_photos: list[PhotoDraft]  # 审计用：每项均已关联自动生成的草稿
+  warnings: list[str]
+  job_status: "completed"         # 当前同步；为未来异步保留字段
+```
+
+同种多张照片全部归属同一条 DraftObservation；一张照片多鸟时只使用懂鸟第一候选；
+文本数量优先于照片张数。
+
+### 4.3 PostgreSQL 表设计
+
+第 1 步只创建 `observations` 及数据库基础设施。`species`、`sessions`、`photos` 及关系表
+属于后续批量切片，必须通过独立 migration 引入。
+
+| 表 | 阶段 | 关键字段与约束 |
+| --- | --- | --- |
+| `observations` | 第 1 步 | `id UUID PK`、`sequence_no BIGINT GENERATED BY DEFAULT AS IDENTITY UNIQUE NOT NULL`（只用于稳定复现 v1 插入顺序）、`timestamp TIMESTAMPTZ NOT NULL`、v1 字段、`flags JSONB NOT NULL DEFAULT '[]'`、`user_id UUID NULL`；保留 `species TEXT NULL` 作为兼容展示值。 |
+| `species` | 第 2 步 | `id UUID PK`（内部匹配键）、`canonical_chinese_name`、`scientific_name NULL`、`taxonomy_source`、`taxonomy_key`、别名数据；`(taxonomy_source, taxonomy_key)` 唯一。确切名录导入源与适配器在本切片开始前写入 `DECISIONS.md`。 |
+| `sessions` | 第 2 步 | `id UUID PK`、`created_at`、`raw_text`、`status`、`user_id NULL`；一次确认提交一条，用于回溯整篇笔记的结果。 |
+| `photos` | 第 2 步 | `id UUID PK`、`content_hash UNIQUE`、`storage_path`、`original_filename`、MIME/大小、识别结果与置信度、`species_id NULL`、`session_id NULL`、`observation_id NULL`。一个 observation 可关联多张照片；一张照片在一次提交中至多归属一条 observation。 |
+
+第 2 步会给 `observations` 增加 `species_id UUID NULL REFERENCES species(id)`。在此之前只使用
+兼容 `species` 文本；在此之后匹配一律使用 `species_id`，`species` 只保存当时的显示/原始标签。
+
+第 1 步数据库技术栈固定为 **SQLAlchemy 2.x + Alembic + psycopg 3**。应用和测试均从
+`DATABASE_URL` 建立同步连接；本地 Docker 使用独立的 `vibirding` 数据库。Alembic 是 schema
+的唯一演进入口，应用启动和正式迁移不得用 `Base.metadata.create_all()` 代替 migration；
+`create_all()` 仅允许用于每个离线用例的临时 schema 初始化，且表结构须由 migration 测试
+单独验证一致性。
+
+### 4.4 数据一致性
+
+- 确认写入以一个数据库事务提交 session、成功的观测和照片归属；每条观测用 savepoint
+  隔离可预期的校验失败，失败记录到 `failed[]`，不能让已成功的条目回滚。
+- 媒体文件先按哈希写入，DB 只提交引用；若 DB 失败，孤儿文件可由后续清理任务处理，
+  不能伪称事务能覆盖文件系统。
+- `user_id` 仅预留可空列；不得在 v2 引入认证系统。
 
 ---
 
-## 6. 关键契约（vibe coding 必须遵守的接口）
+## 5. 模块职责
 
-> 这一节是给 AI 写代码时的"硬约束"。每次让它实现某模块，把对应契约贴过去。
+| 模块 | 职责 |
+| --- | --- |
+| `agent/loop.py` | 保留 v1 的 `model → tool → model` 循环、预算、trace、容错；不感知 PostgreSQL/FastAPI。 |
+| `tools/registry.py` | 统一工具注册、pydantic 校验、写入权限闸、执行和 `{ok, output}` 归一化。 |
+| `memory/log.py` | 兼容层，只暴露 `append()` / `query()`；从 JSONL 实现替换为 repository。 |
+| `db/session.py` | 只负责 engine、session factory、事务边界和测试注入。 |
+| `db/models.py` | SQLAlchemy ORM 表映射，不能包含 LLM 或 HTTP 行为。 |
+| `db/repository.py` | 查询和持久化语义；不格式化给模型看的文本。 |
+| `services/taxonomy.py` | 后续：名录导入、别名/外部结果到内部 `species_id` 的映射。 |
+| `services/media.py` | 后续：内容哈希、去重、文件落盘和元数据。 |
+| `services/parse.py` | 后续：文本拆分、照片识别编排、草稿构造；解析阶段不写 observations。 |
+| `services/matching.py` | 后续：按 `species_id` 关联图文，输出可解释的匹配结果。 |
+| `api/` | 后续：FastAPI 输入验证、依赖注入、HTTP 状态码和响应；不直接嵌入业务 SQL。 |
+| `frontend/` | 后续：输入预览确认和记录管理；不重复后端规则。 |
 
-**LLM 客户端**
+---
 
-```
+## 6. 关键契约
+
+### 6.1 继承的 agent / 工具契约
+
+```python
 class LLMClient:
     def complete(self, messages: list[dict], tools: list[dict] | None = None) -> ModelResponse
-```
 
-- 实现：`DeepSeekClient`（真 API，`openai` SDK，OpenAI 兼容端点，模型 `deepseek-v4-flash`，**手动函数调用**：只声明 tools、自己执行、自己回 role=tool 消息，不用任何自动函数执行）、`MockClient`（脚本化，按预设依次返回 ModelResponse）。
-- `DeepSeekClient` 的职责就是**双向翻译**：把内部 `messages` 译成 OpenAI chat messages（role: system/user/assistant/tool）、把工具定义译成 OpenAI `tools`（type=function）；再把 OpenAI 的 `message.tool_calls` 译回内部 `ModelResponse`（含 `tool_calls` 和归一化的 `stop_reason`）。
-- `MockClient` 是关键：让你**不花一分钱、不连真模型**就能把整个循环测通，它返回的 `ModelResponse` 和 `DeepSeekClient` 一模一样，所以循环换 client 时毫无察觉。
-
-**工具定义**（每个工具一个）
-
-```
-name: str
-description: str          # 给模型看的菜单描述
-input_schema: dict        # JSON Schema；DeepSeekClient 把它作为 OpenAI function 的 parameters 传给模型
-schema: pydantic.Model    # 你这边的输入校验
-risk: str                 # "read" | "write"
-run(input, ctx) -> ToolResult
-```
-
-**工具注册表**
-
-```
 ToolManager.execute(name, input, ctx) -> ToolResult
-# 内部顺序：find(name) → schema 校验 → 若 risk=="write" 过 permissions → run() → try/except 归一化
+run_agent_turn(messages, tools, llm, permissions, budget, trace, on_event=...) \
+    -> tuple[list[dict], str]
+permissions.check(tool_name, risk, input) -> "allow" | "deny" | "always"
 ```
 
-**Agent 回合**
+这些契约继续 provider 中立。DeepSeek/OpenAI 特有的消息和 tool-call 翻译只能留在
+`llm/deepseek_client.py`；不使用 SDK 自动函数执行。
 
-```
-run_agent_turn(
-    messages, tools, llm, permissions, budget, trace, on_event=...
-) -> (final_messages, final_text)
-# 行为：循环调 llm.complete → 若 stop_reason=="tool_use" 则逐个 execute 工具、
-#       把 tool_call + tool_result 追加进 messages、每步写 trace →
-#       直到 end_turn 或 budget 耗尽 → 返回
-# 注：这里的 "tool_use" 是内部归一化值，与 provider 无关；
-#     loop 永远不直接碰 DeepSeek/OpenAI 的形状，那些都在 DeepSeekClient 里处理掉了。
-```
+### 6.2 第 1 步 Log 兼容契约
 
-> **签名自 S1 起锁定**：`run_agent_turn(messages, tools, llm, permissions, budget, trace, ...)` 这个签名从 S1 就固定下来。S1 即建**薄实现**满足它——`budget` 仅做 `max_steps` 止捞，`permissions` 仅 `read→allow`；完整的写入审批见 S5，token 预算与工具容错见 S6。**后续切片只填充 `permissions`/`budget` 的实现深度，不改这个签名。**
-
-**权限闸**
-
-```
-permissions.check(tool_name, risk, input) -> "allow" | "deny"
-# read 自动 allow；write 触发审批回调（CLI 里 y/n；eval/mock 里按策略自动）
-```
-
-**预算**
-
-```
-budget.tick() -> bool            # 还能继续吗
-budget.stop_reason() -> str      # "max_steps" | "max_tokens" | None
-budget.observe(usage) -> None    # S6: loop 每次 model_call 后调用，按归一化 usage 累加 token；tick() 据此可返回 "max_tokens"
-```
-
-> S6 注：token 经 `budget.observe(usage)` 喂入——loop 在每次 model_call 之后加一行 `budget.observe(resp.usage)`（`run_agent_turn` 签名不变）；`tick()` 在下一次调用**前**据累计 token 决定是否停，绝不切断进行中的响应（优雅收尾）。token 口径=Σ(input+output)，多轮重发上下文会重复计入，是有意的保守高估。
-
-**日志（记忆）**
-
-```
-log.append(obs: Observation) -> None                       # 追加一行 JSONL
+```python
+log.append(obs: Observation) -> None
 log.query(place=None, species=None, date_range=None) -> list[Observation]
 ```
 
----
+第 1 步必须保留以下 v1 可观察语义：
 
-## 7. 工具清单（v1）
+- `place` / `species` 是大小写敏感的**子串**过滤；SQL 实现必须转义 `%`、`_`，不能意外采用 SQL 通配符语义。
+- `date_range` 使用 `"start..end"`；不含 `..` 的值不做日期过滤；有日期过滤时 `obs_date is NULL` 不匹配。
+- 结果维持插入顺序；空库返回 `[]`。
+- JSONL 的“坏行静默跳过”不再模拟：数据库约束与事务保证不会写出坏行。因为没有历史 JSONL 数据，这不是迁移兼容问题。
 
-| 工具          | risk      | 作用                                                          | 备注                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
-| ------------- | --------- | ------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `bird_id`     | read      | **本地图片路径** `image_path` → 候选鸟种 + 置信度（中文名）   | **懂鸟(hholove)实现**（S4）：**异步两步**——先上传图片拿识别ID、再用ID轮询取结果；上传须**长超时**（海外 `WriteTimeout` 坑：`connect=10,read=60,write=60,pool=10`），取结果 `timeout=30`、轮询≤5次。鉴权头 `api_key`，所有请求 POST `/dongniao` 走 multipart。**返回是数组 `[code, payload]`**（非字典）：上传 `1000`→payload 是识别ID，取结果 `1000`→payload 是检测目标数组、`1001`→未算完重试、`1008/1009`→未认出。置信度 0~100；物种名 `中文名\|英文名\|拉丁名` 取首段。**异步复杂度全封装在 `run()` 内**，对外只回一个 ToolResult；入参是本地 `image_path`（**非 URL**）。 |
-| `read_log`    | read      | 查**你自己的**历史观测（按地点/种/日期）                      | 用于"我去年在这儿见过啥""这地方我记录过哪些种"——只是个人历史/**弱先验**，不做权威的季节/分布核验（那归 `range_check`，见 §7 / 新 S3）                                                                                                                                                                                                                                                                                                                                                                                                                                         |
-| `range_check` | read      | place + date → 该地当季合理出现的**物种清单**（数据源 eBird） | 季节/分布核验的**正主**；模型从清单里挑与外形描述匹配的种。与 `read_log` 区别：range_check 是**权威**物候/分布数据，read_log 只是**个人历史/弱先验**。**注：`date` 仅作季节提示——实际查询走 eBird `recent`（近 `back` 天、≤30 天、截至今天）作"当季"代理，吃不了任意历史日期；笔记记的是当天/近期时该代理成立。**                                                                                                                                                                                                                                                             |
-| `append_log`  | **write** | 写入一条 Observation                                          | **唯一需要过权限闸的工具**                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+`ReadLogTool` / `AppendLogTool` 的工具名、schema、risk、给模型的描述和文本输出在第 1 步不变；
+`AppendLogTool` 仍由它生成机器字段，只是 ID 改为完整 UUID 字符串。
 
-> **注意**：把乱笔记整理成结构化字段，**不是一个工具**，而是模型自己的本职——它推理后直接把结果填进 `append_log` 的参数里。
-> 另注：`bird_id` 是**鉴种服务的 API**，和运行时大模型（DeepSeek）是两套独立的 API，别混淆。
-> `range_check` 三个小事的落地（S3 已实现）：① 地名→坐标：用"常去观测点预存坐标表"（`tools/locations.py`）；② eBird 名单可能过长：按近期 `back=N` 天取 + 展示截断；③ 中文鸟名：用 obs 端点的 **`sppLocale` 参数**（注意**不是** `locale`——obs 端点会忽略 `locale`），本实现取 `zh_SIM`（简体）。
-> S6 注：工具失败（ok=False）输出统一走 `tools/failures.py` 的 `tool_failure(tool, reason, fallback)`——格式为"⚠ <tool> 暂不可用：<原因>"+回退建议，便于模型识别并按来源优先级回退。仅 `range_check`/`bird_id` 会发**工具级** ok=False；`read_log`/`append_log` 的失败在 registry 级（invalid input / permission denied / tool error）。
+### 6.3 HTTP API 契约（后续第 3 步）
 
----
+```text
+POST   /api/media
+       multipart photo -> {media_id, hash, url}
 
-## 8. 数据流（完整一遍）
+POST   /api/parse
+       {text, media_ids[]} -> {draft_observations[], unmatched_photos[], warnings[], job_status}
 
-```
-cli 读入笔记 → messages=[{user: 笔记}]
-  → run_agent_turn:
-      回合1: llm.complete(=DeepSeekClient) → stop_reason=tool_use, 请求 bird_id
-             registry.execute(bird_id) [read,自动allow] → 候选鸟种
-             追加 tool_call + tool_result;trace×2
-      回合2:（无种名时）llm.complete → 请求 range_check(place,date) 取当地当季合理物种清单 → 模型在清单内匹配外形描述选种；read_log 可选作个人弱先验 → 同上
-      回合3: llm.complete → 请求 append_log(Observation)
-             registry.execute(append_log) [write→permissions.check→y/n]
-             → log.append 写入 observations.jsonl;trace
-      回合4: llm.complete → stop_reason=end_turn, 给最终总结
-  → 返回总结给用户;trace(final)
+POST   /api/observations
+       {text, media_ids[], observations[]} -> {session_id, created[], failed[]}
+
+GET    /api/observations?limit=&place=&species=&date_from=
+GET    /api/observations/{id}
+PATCH  /api/observations/{id}
+DELETE /api/observations/{id}
+GET    /api/species?q=
 ```
 
-**物种来源优先级（裁决规则）** —— species 该信谁的：用户指定 > 图片鉴定 > 描述推断（经 `range_check` 核验）：
-
-1. 笔记里**直接指定**了物种名 → `species` 填用户给的名字，`confidence=None`，`source="user"`；有没有图片/描述都如此。
-2. 在第1条基础上，若同时有图片或外形描述，且自动鉴定（图片或描述推断）结果与用户指定**不一致** → `species` 仍用用户指定，但 `flags` 加入 `"autoid_conflict"`（与自动鉴定有分歧）。
-3. 没指定种名但**有图片** → 以 `bird_id` 结果为准，`source="bird_id"`。
-4. 既没种名也没图片 → 走"描述 → 模型推断 → `range_check` 季节核验"，`source="inferred"`；拿不准就 `species=None` 并加 `"low_confidence"`。（`range_check` 已于 S3 实现并接入；仅当它不可用时——未知地点 / 网络失败 / 空清单——第4条才退回"仅靠模型鸟类学知识推断"，并按 prompt 的失败处理策略酌情标 `low_confidence`。）
+`POST /api/parse` 无写 observation 副作用；`POST /api/observations` 是用户确认后的批量写入。
+`created[]` 和 `failed[]` 必须始终同时存在，即使其中一个为空。
 
 ---
 
-## 9. Eval 设计
+## 7. 批量处理与权限流程（后续第 2 步）
 
-**两份文件（防泄题）**：题目与答案分离——喂给模型的只有题目档，答案档只有评分器读，杜绝任何路径把答案漏进 prompt。两档按 `id` 配对。
+1. 文本拆分：将一篇笔记拆成多条草稿，地点、日期等共享上下文下发给每条。
+2. 照片鉴定：每张照片调用现有懂鸟适配器；只读取第一候选作为该照片的物种候选。
+3. 规范化：文本物种和照片候选分别通过 taxonomy service 映射为 `species_id`；任何失败进入
+   `warnings` / `needs_confirmation`，不能自动声称匹配成功。
+4. 匹配：同一 `species_id` 的所有照片归属同一草稿；未与任何文本物种匹配的照片自动创建
+   一条照片来源的 DraftObservation。`unmatched_photos` 保留该来源照片及其自动创建草稿的
+   对应关系，供前端解释和审计，而不是等待用户决定是否建记录。
+5. 预览确认：前端展示全部草稿（包括自动创建的照片来源记录）、归属照片和警告；用户可调整
+   草稿内容，但以一次确认整个批次决定是否落库。
+6. 写入：创建 session，逐条持久化；成功的记录与照片照常落盘，失败项精确返回原因。
 
-**题目档 `evals/tasks.yaml`** —— 每条只有输入，绝不含答案：
+v1 CLI 的单条 `append_log` 权限闸仍保留，不能用“Web 有确认按钮”倒推删除它。
 
-```
-- id: t00
-  input_note: "7月12日上午 葛西临海公园 大嘴乌鸦 3只"   # 笔记原文（内联）
-  image_path: null                                     # 本地图片路径（bird_id 入参），无图为 null
-```
+---
 
-**答案档 `evals/answers.yaml`** —— 每条只有断言，按 `id` 与题目档配对：
+## 8. Web 交互边界（后续第 3 步）
 
-```
-- id: t00
-  expected:
-    place: "葛西临海公园"
-    count: 3
-    species_in: ["大嘴乌鸦"]
-    source: "user"
-    confidence: null
-    must_call_tools: ["append_log"]
-```
+### 输入页
 
-**expected 支持的断言键（评分契约）**——**全部可选**，只断言写了的键；一条用例的所有断言**全过**才 PASS：
+文本框、插图按钮、发送按钮和解析预览。自然语言查询可在前端直接转为资源 API，例如
+“最近 10 条”对应 `GET /api/observations?limit=10`；不让 LLM 查询数据库后再复述。
 
-| 键 | 形态 | 判定 |
+### 管理页
+
+浏览、筛选、编辑、删除观测；查看其关联照片和批次。跨提交“修改刚才那条”不交给 agent
+猜测，走这张管理页的显式 PATCH/DELETE 操作。
+
+---
+
+## 9. 测试与验收
+
+### 第 1 步 PostgreSQL
+
+- Docker 本地 PostgreSQL 能创建 schema 并执行 migration。
+- 数据库驱动使用 psycopg 3；migration 使用 Alembic，`alembic upgrade head` 是本地建表入口。
+- `append_log` / `read_log` 的现有工具契约不变；CLI 不需改成交付入口以外的形态。
+- 每个 eval 用例使用独立临时 schema，结束后删除；不能污染开发 schema，也不能依赖 JSONL。
+- v1 离线 eval 仍为 **13/13**；现有离线自检全部通过。
+- 覆盖 UUID、`flags JSONB`、空库、子串查询、日期范围、事务失败等存储测试。
+
+### 第 2 步批量与匹配
+
+- 多条拆分及共享地点/日期下发正确。
+- 同种多图、数量冲突、首候选、多种/未匹配照片、物种映射失败均有离线用例。
+- 部分成功的 `created[]` / `failed[]` 可复现；v1 单条用例不退化。
+
+### 第 3 步 Web
+
+- 先用 HTTP 客户端覆盖 API，再接 React。
+- 验证 parse 可重试且不写 observations；未确认不能创建记录；确认后才创建 session、记录和关联。
+
+---
+
+## 10. 实施计划
+
+| 阶段 | 只做什么 | 验收 |
 | --- | --- | --- |
-| `place` | str | `actual.place` 精确相等 |
-| `count` | int/null | `actual.count` 精确相等（null→必须为空） |
-| `count_around` | int | `\|actual.count − N\| ≤ count_tol`（默认 ±5，可加 `count_tol` 覆盖）；`actual.count` 为空则 FAIL。用于"十几只"等模糊量词 |
-| `species_in` | list（可含 null） | `actual.species ∈ 清单`；清单含 `null` 表示"种为空也算对" |
-| `source` | str | `actual.source` 精确相等 |
-| `confidence` | null | `actual.confidence` 为空（当前仅用 null 形态：测 source=user 时不许给分值） |
-| `behavior_not_null` | true | `actual.behavior` 非空 |
-| `time_of_day_not_null` | true | `actual.time_of_day` 非空 |
-| `flags_contains_any` | list（token） | **命中即过**：存在某 token 是某条 `actual.flag` 的子串（or 语义 + 子串匹配，容忍模型用中文写 flag，如 "季节异常" 命中 "季节"） |
-| `must_call_tools` | list | **子集**：列出的工具名都在本回合 tool_call 事件里出现过（多调不算错） |
-| `tool_ok_even_if_unknown_place` | true | 若 `range_check` 被调用且地点不在坐标表，其 `ToolResult.ok` 仍为 True（优雅降级），且回合正常产出并写入 Observation |
-| `must_not_write` | true | 断言"不该写入"：发生 append_log 写入即 FAIL（**默认 false**；当前 13 条均需写入，故都不设——must_call_tools 缺省**不**等于禁止写入） |
-
-> 判定所依据的 `actual`：跑完 agent 后，从**该用例专属的临时 Log** 读回写入的 Observation（未写入 → 字段类断言自然 FAIL 并打印"未发生写入"）；工具调用情况取自 trace 的 tool_call 事件。
-
-**`run_evals.py`** —— 对每条用例跑 agent，按上表比对，输出**通过率 + 逐条 pass/fail**；FAIL 打印逐字段"期望 vs 实际" + 实际工具调用序列 + trace 路径，便于分析"为什么没过"。
-
-**两档运行**（`--offline` 默认 / `--online`）：
-- **离线档（默认）**：`MockClient` + `range_check`/`bird_id` 桩工具，零网络 / 零 key / 不碰真日志。评分器**据 answers 合成"理想模型"剧本**驱动真实循环，故应稳定 100%——它守护的是"循环→registry→权限闸→Log→读回"这条管线与比对器本身没被改坏（**回归保险**）。
-- **在线档（`--online`）**：低温真 DeepSeek + 真工具，测**真实识别质量**，允许非满分即真实指标。缺 `DEEPSEEK_API_KEY` 直接报错退出。默认**跳过带图用例**；`--online-images` 才放开（保护懂鸟额度）。`--max-cases` / `--ids` / `--max-steps` 控量。
-
-**隔离**：每条用例用临时 Log（永不碰 `data/observations.jsonl`）+ 注入式自动 approver（返回 "always"，不走 stdin）；eval trace 写临时目录、跑完清理（复用 S5/S6 范式）。
-
-> **跑法（S7 已拍板）**：用**低温的真 DeepSeek**，不用 `MockClient`——DeepSeek API 便宜、token 不是瓶颈，真模型才测得出真实表现；但脚本**必须限制调用次数**（每条用例给小的 `Budget(max_steps=…)`，并对总用例数设上限）。
-> **⚠ 真正稀缺的是懂鸟(hholove) API：只有 50 次免费调用**（它是 `bird_id` 的后端）。因此**带 `image_path` 的用例必须严格限量**，用例集以**无图为主**（覆盖 range_check / 描述推断 / 写入路径），带图用例只留极少数。
-
-> 这个通过率曲线 + 你能解释"没过的为什么难"，是简历里最硬的一块。
+| 0. 文档对齐 | 本文、需求、决策和工作区指引一致；冻结 v1 快照。 | 新 AI 仅靠文档能说明现状、目标、当前切片和不做项。 |
+| 1. PostgreSQL | Docker、SQLAlchemy、migration、`observations`、`Log` 兼容实现、eval 数据库隔离。 | v1 离线 eval 13/13，且不引入批量/媒体/Web。 |
+| 2.1 文本拆分 | 一篇笔记 -> 多个草稿，共享上下文下发。 | 独立离线测试。 |
+| 2.2 照片预处理 | 批量调用现有懂鸟适配器，输出规范化候选输入。 | 纯脚本/服务测试，不写库。 |
+| 2.3 物种名录与 dry-run 匹配 | `species` migration、映射、只输出匹配方案。 | ID 匹配和失败可解释，不写 observations。 |
+| 2.4 批量确认写入 | `sessions` / `photos` migration、一次确认、部分成功。 | 事务和失败结果测试。 |
+| 2.5 未匹配照片 | 未匹配照片自动生成记录，并纳入同一批预览确认。 | 覆盖自动建记录与用户统一确认的边界用例。 |
+| 3. Web | FastAPI API -> React 输入页 -> React 管理页。 | API 先验收，再验收 UI。 |
+| 4. 收尾 | README / STATUS / DECISIONS 更新，最终回归，打 `v2.0` tag。 | 文档、测试、发布状态一致。 |
 
 ---
 
-## 10. 推荐搭建顺序（每个切片都能跑）
+## 11. 开发纪律
 
-| 切片 | 内容                                                                                                                                                                                                             | 验收                                                       |
-| ---- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------- |
-| S1   | `schemas` + `MockClient` + `loop` + `registry` + 假 `read_log` + `trace` + 薄版 `budget`(仅 max_steps) + 薄版 `permissions`(read→allow) + `scripts/run_s1.py`；S1 锁定 loop 签名，权限/预算完整逻辑在 S5/S6 填充 | 离线、零成本，循环能跑通，trace 打印出每步                 |
-| S2   | `DeepSeekClient`(openai/OpenAI 兼容) 接真模型，能产出结构化 `Observation`                                                                                                                                        | 真模型跑通一条笔记                                         |
-| S3   | `range_check` 适配器（eBird，纯文本+HTTP）：place+date → 当地当季合理物种清单；补"无图仅描述"识别短板                                                                                                            | 给定 place+date 能取回当季合理物种清单，模型能在清单内选种 |
-| S4   | `bird_id` 真适配器（先验证鉴种 API）                                                                                                                                                                             | 带照片能拿到候选种                                         |
-| S5   | `memory/log` 的 append/query + `append_log` 写入 + 权限闸                                                                                                                                                        | 能写日志、写前要确认、能查回来                             |
-| S6   | `budget` 步数上限 + 工具报错容错                                                                                                                                                                                 | 死循环/报错不会失控                                        |
-| S7   | `evals`：10–15 条用例 + 通过率                                                                                                                                                                                   | 一条命令出通过率                                           |
-| S8   | `cli` 打磨 + `README` + `DECISIONS.md`                                                                                                                                                                           | 别人能 clone 跑起来                                        |
-
-> S1 用 MockClient 把循环逻辑和真模型解耦，是整条路最省钱、最好 debug 的起点。**先把脑子（循环）调通，再接嘴（DeepSeek）和手（鉴种 API）。**
-
----
-
-## 11. 可选进阶（面试谈资，做完 v1 再说，别提前背上）
-
-- **核验子 agent（多 agent）**：一个专职 agent 拿 `bird_id` 结果 + `range_check` 的结果（分布数据）+ `read_log` 的个人历史，二次判断"这个种在这个时间地点合不合理"，给 `flags`。这是把单 agent 升级成多 agent 协同最自然的一步。
-- **季节/分布核验**：已升为正式切片（新 S3 `range_check`，数据源 eBird），见 §7 / §10——不再属于"可选进阶"。
-- **本地模型**：给 `LLMClient` 再加一个走 OpenAI 兼容端点的实现，接 llama.cpp/vllm，`--local` 开关——因为接口是 provider 中立的，这一步和接 DeepSeek 一样只动 `llm/` 一个文件。**别一开始碰这个**。
-- **大工具结果移出 prompt** / **SQLite 替代 JSONL**：数据量大了再说。
-- **批量笔记（暂定 S9，未实现，仅登记）**：一篇笔记含多条记录、各记录可带各自的本地照片路径 `image_path`，一次输入 → 整理成多条 Observation。待解点：多次/批量 `append_log` 的权限确认粒度、图文配对、部分失败处理、预算放大、多记录 eval。**依赖 S1–S8 单条主线完整且经 eval 验证后再做。**
-
----
-
-## 12. 给 vibe coding 的三条铁律
-
-1. 每个切片开工前，把本文档 + 该切片要碰的契约发给 AI，**不要让它自由发挥结构**。
-2. 一次只让它实现一个模块，你读懂 diff 再进下一个；每个能跑的切片 `git commit` 一次。
-3. 边做边往 `DECISIONS.md` 记取舍（为什么 JSONL 不用数据库？为什么写入过闸？为什么 DeepSeek 手动函数调用、不用自动执行？）——这是你"思考"的显性化。
+1. 不改的东西不要碰；一次一个模块、一个可验收切片。
+2. 接口或数据结构变化先改本文，并将取舍以三行体写入 `DECISIONS.md`。
+3. 任何核心改动后必须跑相关离线自检；存储和 agent 改动必须跑 v1 eval。
+4. 真实 API 与带图测试消耗配额，默认不用它们替代离线回归。
+5. 不提前引入框架、抽象或 agent；能用明确服务和工具解决的，不上子 agent。

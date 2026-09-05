@@ -46,6 +46,7 @@ from vibirding.harness.budget import Budget  # noqa: E402
 from vibirding.harness.permissions import Permissions  # noqa: E402
 from vibirding.harness.trace import TraceWriter  # noqa: E402
 from vibirding.llm.deepseek_client import DeepSeekClient, DeepSeekError  # noqa: E402
+from vibirding.db.session import DatabaseConfigError  # noqa: E402
 from vibirding.memory.log import Log  # noqa: E402
 from vibirding.schemas import Observation  # noqa: E402
 from vibirding.tools.bird_id import BirdIdTool  # noqa: E402
@@ -113,7 +114,7 @@ def _token_totals(events: list) -> tuple[int, int]:
 
 
 def build_registry(log: Log) -> ToolManager:
-    """Register all four tools against one shared Log handle (the real log)."""
+    """Register all four tools against one shared PostgreSQL Log handle."""
     registry = ToolManager()
     registry.register(ReadLogTool(log))
     registry.register(RangeCheckTool())
@@ -156,7 +157,11 @@ def main(argv: list[str] | None = None) -> int:
     else:
         user_content = note
 
-    log = Log()  # the real data/observations.jsonl
+    try:
+        log = Log()
+    except DatabaseConfigError as e:
+        print("✗ 初始化 PostgreSQL 失败：", e)
+        return 2
     registry = build_registry(log)
     permissions = Permissions(approver=_auto_approver if args.yes else _cli_approver)
 

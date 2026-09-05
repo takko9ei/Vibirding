@@ -97,7 +97,7 @@ class AppendLogTool:
         ok=False (full tool error-tolerance is S6).
         """
         data = dict(input)  # copy so we never mutate the caller's dict
-        data["id"] = uuid.uuid4().hex[:8]
+        data["id"] = str(uuid.uuid4())
         data["timestamp"] = datetime.now(timezone.utc).isoformat()
         obs = Observation.model_validate(data)
         self._log.append(obs)

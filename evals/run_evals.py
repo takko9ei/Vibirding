@@ -14,8 +14,9 @@ Two lanes (architecture section 9):
     Image cases are skipped unless --online-images (protects the hholove quota,
     which has only ~50 free calls).
 
-Every case is isolated: a throwaway temp Log (data/observations.jsonl is NEVER
-touched), an injected auto-approver ("always", no stdin), and a temp trace dir.
+Every case is isolated: its own temporary PostgreSQL schema (the development
+schema is NEVER touched), an injected auto-approver ("always", no stdin), and a
+temp trace dir.
 This reuses the whole existing stack (loop / ToolManager / real tools / Log /
 Permissions / Budget / TraceWriter / MockClient) — the only eval-specific code is
 the answers->script synthesizer and the two network-tool stubs, both living here.
@@ -58,6 +59,7 @@ from vibirding.tools.log_read import ReadLogTool  # noqa: E402
 from vibirding.tools.log_write import AppendLogTool  # noqa: E402
 from vibirding.tools.range_check import RangeCheckInput, RangeCheckTool  # noqa: E402
 from vibirding.tools.registry import ToolContext, ToolManager  # noqa: E402
+from scripts.db_test_support import new_test_log  # noqa: E402
 
 DEFAULT_TASKS = ROOT / "evals" / "tasks.yaml"
 DEFAULT_ANSWERS = ROOT / "evals" / "answers.yaml"
@@ -244,7 +246,7 @@ class CaseResult:
 def run_case(case: dict, lane: str, args, online_llm) -> CaseResult:
     """Run one case in isolation and grade it."""
     tmp = Path(tempfile.mkdtemp(prefix="vibirding_eval_"))
-    log = Log(tmp / "obs.jsonl")
+    log = new_test_log(f"eval_{case['id']}")
 
     registry = ToolManager()
     registry.register(ReadLogTool(log))
@@ -358,8 +360,8 @@ def main() -> int:
             print("✗ 初始化 DeepSeek 失败：", e)
             return 2
 
-    # Guard: prove we never touch the real log.
-    real_log_before = _real_log_lines()
+    # Guard: prove isolated eval schemas never touch development observations.
+    real_log_before = _real_log_count()
 
     print("=" * 72)
     print(f"S7 Evals（{lane}）— 用例 {len(cases)} 条"
@@ -403,20 +405,17 @@ def main() -> int:
         print("（失败用例的临时目录/trace 已保留，路径见上，便于分析）")
     print("-" * 72)
 
-    real_log_after = _real_log_lines()
+    real_log_after = _real_log_count()
     if real_log_before != real_log_after:
-        print(f"⚠ 警告：真日志行数变化 {real_log_before} -> {real_log_after}（本应不变！）")
+        print(f"⚠ 警告：开发库记录数变化 {real_log_before} -> {real_log_after}（本应不变！）")
         return 3
 
     return 0 if passed == total else 1
 
 
-def _real_log_lines() -> int:
-    """Line count of the REAL data/observations.jsonl (0 if absent) — pollution guard."""
-    p = Log().path
-    if not p.exists():
-        return 0
-    return len([ln for ln in p.read_text(encoding="utf-8").splitlines() if ln.strip()])
+def _real_log_count() -> int:
+    """Row count of the development observation schema — pollution guard."""
+    return len(Log().query())
 
 
 if __name__ == "__main__":

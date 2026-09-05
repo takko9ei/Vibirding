@@ -1,8 +1,8 @@
 #!/usr/bin/env python
 """S1 verification suite — one case per contract/edge, printed as a PASS/FAIL table.
 
-Dev-time only (scripts/ is for temporary smoke/verification scripts). Fully
-offline: no network, no real model. Run:
+Dev-time only (scripts/ is for temporary smoke/verification scripts). No
+external network or real model; the local PostgreSQL container is required. Run:
 
     python scripts/check_s1.py
 
@@ -43,8 +43,9 @@ from vibirding.schemas import (  # noqa: E402
 from vibirding.memory.log import Log  # noqa: E402
 from vibirding.tools.log_read import ReadLogTool  # noqa: E402
 from vibirding.tools.registry import ToolContext, ToolManager  # noqa: E402
+from scripts.db_test_support import new_test_log  # noqa: E402
 
-# Throwaway temp dir so read_log tests hit a hermetic file, not real data/.
+# Throwaway temp dir for trace artifacts; database rows use isolated schemas.
 _TMP = Path(tempfile.mkdtemp(prefix="vibirding_s1_"))
 _RESULTS: list[tuple[str, str, bool, str]] = []  # (group, name, passed, detail)
 
@@ -55,7 +56,7 @@ def check(group: str, name: str, passed: bool, detail: str = "") -> None:
 
 def _reg_readlog() -> ToolManager:
     r = ToolManager()
-    r.register(ReadLogTool(Log(_TMP / "empty.jsonl")))  # hermetic empty log
+    r.register(ReadLogTool(new_test_log("s1_empty")))
     return r
 
 
@@ -200,9 +201,9 @@ check("permissions", "read→allow / write→deny",
       and Permissions().check("append_log", "write", {}) == "deny")
 
 
-# ── H. read_log filtering (real log, seeded temp file) ───────────────────────
-seeded = Log(_TMP / "seeded.jsonl")
-seeded.append(Observation(id="h1", timestamp="2025-04-12T00:00:00+00:00",
+# ── H. read_log filtering (real repository, isolated schema) ────────────────
+seeded = new_test_log("s1_seeded")
+seeded.append(Observation(id="00000000-0000-0000-0000-000000000001", timestamp="2025-04-12T00:00:00+00:00",
                           place="葛西临海公园", obs_date="2025-04-12",
                           species="黑翅长脚鹬", count=12, raw_note="海边涉禽",
                           source="inferred"))

@@ -72,7 +72,7 @@ def main() -> int:
         config.load_ebird_api_key = lambda: "BOGUS-KEY-FORCING-FAILURE"  # type: ignore[assignment]
         print("（--break-ebird：eBird key 改为 bogus，range_check 将失败以演示优雅回退）")
 
-    log = Log()  # the real data/observations.jsonl
+    log = Log()  # the real PostgreSQL observation store
     registry = ToolManager()
     registry.register(ReadLogTool(log))
     registry.register(RangeCheckTool())

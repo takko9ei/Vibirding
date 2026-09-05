@@ -16,11 +16,9 @@ from dotenv import load_dotenv
 PACKAGE_DIR = Path(__file__).resolve().parent
 ROOT_DIR = PACKAGE_DIR.parent
 
-# data/ is gitignored: holds the append-only log and the JSONL traces.
+# data/ is gitignored and still holds per-run JSONL traces.
 DATA_DIR = ROOT_DIR / "data"
 TRACES_DIR = DATA_DIR / "traces"
-# The append-only observation log written by the append_log tool (memory/log.py).
-OBSERVATIONS_PATH = DATA_DIR / "observations.jsonl"
 
 # --- DeepSeek runtime model (OpenAI-compatible endpoint) ---
 DEEPSEEK_BASE_URL = "https://api.deepseek.com"
@@ -52,6 +50,12 @@ HHO_UPLOAD_TIMEOUT = {"connect": 10, "read": 60, "write": 60, "pool": 10}
 HHO_RESULT_TIMEOUT_S = 30  # the poll request is small
 HHO_POLL_MAX = 5  # max poll attempts before giving up (code 1001 = not ready)
 HHO_POLL_INTERVAL_S = 2  # wait between polls
+
+
+def load_database_url() -> str | None:
+    """Return the synchronous SQLAlchemy DATABASE_URL from the project `.env`."""
+    load_dotenv(ROOT_DIR / ".env")
+    return os.environ.get("DATABASE_URL")
 
 
 def load_deepseek_api_key() -> str | None:

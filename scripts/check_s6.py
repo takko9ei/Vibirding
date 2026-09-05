@@ -1,7 +1,8 @@
 #!/usr/bin/env python
 """S6 verification suite (offline) — budget + tool error-tolerance + graceful stop.
 
-Dev-time only. Fully offline: no network, no real model, no API key. We stub
+Dev-time only. No external network, real model, or API key; the local PostgreSQL
+container is required. We stub
 httpx.get/post to inject faults (bad JSON, timeout, bad upload code), drive the
 real run_agent_turn with a scripted MockClient to hit max_steps / max_tokens, and
 feed memory/log a corrupt line. Assertions: every failure normalizes (no bare
@@ -23,6 +24,7 @@ import json
 import shutil
 import sys
 import tempfile
+import uuid
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -47,6 +49,7 @@ from vibirding.tools.bird_id import BirdIdTool  # noqa: E402
 from vibirding.tools.log_read import ReadLogTool  # noqa: E402
 from vibirding.tools.range_check import RangeCheckTool  # noqa: E402
 from vibirding.tools.registry import ToolContext, ToolManager  # noqa: E402
+from scripts.db_test_support import new_test_log  # noqa: E402
 
 
 # ── offline guards + fake keys (suite is throwaway; no need to restore) ───────
@@ -74,10 +77,10 @@ def check(group: str, name: str, passed: bool, detail: str = "") -> None:
     _RESULTS.append((group, name, bool(passed), detail))
 
 
-def _new_path() -> Path:
+def _new_log() -> Log:
     global _N
     _N += 1
-    return _BASE / f"log_{_N}.jsonl"
+    return new_test_log(f"s6_{_N}")
 
 
 def _obs(**over) -> Observation:
@@ -86,7 +89,7 @@ def _obs(**over) -> Observation:
         "count": 5, "raw_note": "n", "source": "inferred",
     }
     data.update(over)
-    data.setdefault("id", "tid")
+    data.setdefault("id", str(uuid.uuid4()))
     data.setdefault("timestamp", "2025-06-01T00:00:00+00:00")
     return Observation.model_validate(data)
 
@@ -119,7 +122,7 @@ def _scripted(responses):
 def _safe_loop(script, budget):
     """Drive run_agent_turn with a scripted model; return (events, final, error)."""
     reg = ToolManager()
-    reg.register(ReadLogTool(Log(_new_path())))  # hermetic empty log; read always ok
+    reg.register(ReadLogTool(_new_log()))  # hermetic empty log; read always ok
     trace = TraceWriter(run_id=f"s6_{_N}", traces_dir=_BASE, to_console=False)
     ev: list = []
     try:
@@ -202,20 +205,17 @@ check("range_check", "超时 → ok=False + '超时' (回归)", (not r.ok) and "
 check("range_check", "超时 → 统一前缀", r.output.startswith("⚠ range_check"))
 
 
-# ── E. log.query skips a corrupt line ────────────────────────────────────────
-p = _new_path()
-log = Log(p)
+# ── E. database constraints prevent corrupt stored rows ─────────────────────
+log = _new_log()
 log.append(_obs(species="甲"))
-with open(p, "a", encoding="utf-8") as f:
-    f.write("{这是一行坏 json\n")  # corrupt middle line
 log.append(_obs(species="乙"))
 try:
     rows = log.query()
     q_err = None
 except Exception as e:
     rows, q_err = [], e
-check("log", "坏行不抛异常", q_err is None, repr(q_err))
-check("log", "坏行跳过，仍取回 2 条好记录",
+check("log", "数据库查询不抛异常", q_err is None, repr(q_err))
+check("log", "约束内两条记录均可取回",
       len(rows) == 2 and {r.species for r in rows} == {"甲", "乙"}, str(len(rows)))
 
 
