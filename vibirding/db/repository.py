@@ -211,6 +211,43 @@ class PhotoRepository:
         )
         self._session.flush()
 
+    def create_or_get(
+        self, metadata: PhotoMetadataInput
+    ) -> tuple[PhotoRow, bool]:
+        """Insert by content hash, or return the row created by another upload."""
+        candidate = metadata.candidate
+        statement = (
+            insert(PhotoRow)
+            .values(
+                id=metadata.photo_id,
+                content_hash=metadata.content_hash,
+                storage_path=metadata.storage_path,
+                original_filename=metadata.original_filename,
+                mime_type=metadata.mime_type,
+                size_bytes=metadata.size_bytes,
+                species_label=(candidate.species_label if candidate else None),
+                scientific_name=(candidate.scientific_name if candidate else None),
+                confidence=(candidate.confidence if candidate else None),
+                provider_candidate_id=(
+                    candidate.provider_candidate_id if candidate else None
+                ),
+            )
+            .on_conflict_do_nothing(index_elements=[PhotoRow.content_hash])
+            .returning(PhotoRow)
+        )
+        created = self._session.scalars(statement).one_or_none()
+        if created is not None:
+            return created, True
+
+        existing = self._session.scalar(
+            select(PhotoRow).where(
+                PhotoRow.content_hash == metadata.content_hash
+            )
+        )
+        if existing is None:
+            raise RuntimeError("photo upsert did not return or find a row")
+        return existing, False
+
     def lock_many(self, photo_ids: list[uuid.UUID]) -> dict[uuid.UUID, PhotoRow]:
         if not photo_ids:
             return {}

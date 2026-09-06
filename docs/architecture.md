@@ -14,8 +14,10 @@
 **v2 的 PostgreSQL 存储底座已经完成。** PostgreSQL、SQLAlchemy、Alembic 和 psycopg 3
 已经替换 JSONL 持久化，并保留 v1 单条 CLI、工具契约与离线 eval 基线。
 
-**2.1–2.5 已完成、验证并提交。Web 视觉与响应式方向已经确认并写入第 8 节，当前等待文档
-review。** review 前不得开始第 3 步 Web/API，不得创建 FastAPI 或 React 实现。
+**2.1–2.5 已完成、验证并提交，Web 视觉与响应式方向也已确认。3.1 FastAPI 媒体上传已经
+实现并通过回归，当前等待 review。** 本切片建立 FastAPI 工厂和 `POST /api/media`，完成
+单张 JPEG 的大小/格式校验、内容哈希去重、文件保存、photos 元数据写入和可访问 URL；
+review 前不得开始 parse、observations、species API、CORS 或 React。
 
 **不迁移旧数据。** v1 真实 `data/` 为空；这次是 schema migration，不是数据 migration。
 
@@ -107,7 +109,7 @@ Vibirding/
 │   ├── V2-REQUIREMENTS.md                # 需求与已拍板决定
 │   └── STATUS.md
 ├── migrations/                           # 第 1 步：数据库迁移
-├── media/                                # 后续：gitignore，内容哈希文件名
+├── media/                                # 第 3.1 步：gitignore，SHA-256.jpg 文件名
 ├── vibirding/
 │   ├── schemas.py                        # v1 兼容模型 + 第 2.1/2.2 步批量模型
 │   ├── config.py                         # 路径、模型、外部 API、数据库配置
@@ -126,8 +128,10 @@ Vibirding/
 │   │   ├── taxonomy.py                   # 第 2.3 步：名录导入与名称解析
 │   │   ├── matching.py                   # 第 2.3 步：只读图文匹配计划
 │   │   ├── assembly.py                   # 第 2.5 步：组装预览并生成未匹配照片草稿
-│   │   └── batch.py                      # 第 2.4 步：确认后的事务化批量写入
-│   └── api/                              # 后续：FastAPI app、路由和依赖
+│   │   ├── batch.py                      # 第 2.4 步：确认后的事务化批量写入
+│   │   └── media.py                      # 第 3.1 步：哈希、校验、文件保存和去重
+│   └── api/
+│       └── app.py                        # 第 3.1 步：FastAPI 工厂和媒体路由
 ├── frontend/                             # 后续：React 应用
 ├── evals/                                # 保留 v1 eval，后续新增 v2 用例
 └── scripts/                              # 开发期自检与冒烟脚本
@@ -270,6 +274,13 @@ FailedObservation
 
 BatchWriteResult
   session_id / created[] / failed[]
+
+StoredPhoto
+  photo_id / content_hash / storage_path / original_filename
+  mime_type / size_bytes / created
+
+MediaUploadResponse
+  media_id / hash / url
 ```
 
 ### 4.3 PostgreSQL 表设计
@@ -319,13 +330,13 @@ NULL。`photos` 行代表已经由上传阶段保存到文件系统的媒体元�
 | `db/models.py` | SQLAlchemy ORM 表映射，不能包含 LLM 或 HTTP 行为。 |
 | `db/repository.py` | 查询和持久化语义；不格式化给模型看的文本。 |
 | `services/taxonomy.py` | 第 2.3 步：eBird 名录适配、导入、别名/外部结果到内部 `species_id` 的映射。 |
-| `services/media.py` | 后续：内容哈希、去重、文件落盘和元数据。 |
+| `services/media.py` | 第 3.1 步：流式限制上传大小、校验 JPEG、按 SHA-256 保存，并与 photos 元数据幂等去重。 |
 | `services/parse.py` | 第 2.1/2.2 步：文本拆分、照片预处理与草稿构造；解析阶段不写 observations。 |
 | `tools/bird_id.py` | 保留 v1 `run()` 文本工具契约，并提供结构化 `identify()` 给批处理服务复用。 |
 | `services/matching.py` | 第 2.3 步：按 `species_id` 关联图文，只输出可解释的 dry-run 方案。 |
 | `services/batch.py` | 第 2.4 步：验证明确确认、锁定媒体、创建 session，以 savepoint 逐条写入并汇总 created/failed。 |
 | `services/assembly.py` | 第 2.5 步：消费 dry-run 结果，复制并补全草稿、合并未匹配照片，输出统一确认前的 `ParseResult`；不写库。 |
-| `api/` | 后续：FastAPI 输入验证、依赖注入、HTTP 状态码和响应；不直接嵌入业务 SQL。 |
+| `api/app.py` | 第 3.1 步起：FastAPI 应用工厂、路由装配、依赖注入和 HTTP 错误映射；不直接嵌入业务 SQL。 |
 | `frontend/` | 后续：输入预览确认和记录管理；不重复后端规则。 |
 
 ---
@@ -501,6 +512,39 @@ GET    /api/species?q=
 `POST /api/parse` 无写 observation 副作用；`POST /api/observations` 是用户确认后的批量写入。
 `created[]` 和 `failed[]` 必须始终同时存在，即使其中一个为空。
 
+### 6.9 第 3.1 步 FastAPI 媒体上传契约
+
+```python
+MediaStorageService.store(
+    stream: BinaryIO,
+    original_filename: str,
+    mime_type: str,
+) -> StoredPhoto
+
+POST /api/media
+multipart field: photo
+-> 201 MediaUploadResponse             # 新文件
+-> 200 MediaUploadResponse             # 相同内容复用
+```
+
+- 应用使用 `create_app(session_factory=None, media_dir=None)` 工厂，以便正式运行读取
+  `DATABASE_URL` / 根目录 `media/`，测试注入临时数据库 schema 和临时目录。3.1 不启用 CORS，
+  后续确定 React 开发/部署来源时再配置明确 allowlist。
+- 只接受声明为 `image/jpeg`（兼容 `image/jpg`）且文件头为 JPEG 的非空文件；上限固定为
+  2 MiB，与现有懂鸟接口约束一致。读取必须分块并在超过上限时立即失败，不能先把任意大文件
+  全部读入内存。
+- 服务计算文件字节的 SHA-256，最终文件名固定为 `<hash>.jpg`，不得使用原始文件名拼路径；
+  `original_filename` 只保存去除目录后的审计名称。临时文件与最终文件必须都限制在注入的
+  media 根目录内。
+- `photos.content_hash` 是去重键。同一内容重复上传返回已有 `media_id` 和相同 URL，数据库只
+  保留一行，文件系统只保留一份；首次上传返回 201，复用返回 200。
+- 数据库保存文件绝对路径、原始名称、规范 MIME 和实际字节数；3.1 不调用懂鸟，不写候选/
+  `species_id`，不创建 session 或 observation。
+- 返回 URL 为 `/media/<hash>.jpg`，由 FastAPI 静态文件挂载只读提供。非法 MIME 返回 415，
+  空文件或伪 JPEG 返回 400，超过上限返回 413；失败不得留下临时文件或 photos 行。
+- 文件系统与 PostgreSQL 无法共享事务：文件写成功而 DB 发生不可恢复错误时可能留下哈希命名
+  的孤儿文件，后续清理任务可安全识别；不得声称数据库 rollback 能删除文件。
+
 ---
 
 ## 7. 批量处理与权限流程（后续第 2 步）
@@ -632,6 +676,8 @@ React 实现应以共享设计 token 和可复用业务组件表达上述设计�
 - React 只包含“记一笔 / 观察记录”两个页面；覆盖 loading、空状态、错误、部分成功、编辑和
   删除确认。
 - 在 1024px、736px、360px 验证响应式布局、键盘操作和可见焦点，不得出现页面级横向溢出。
+- 3.1 单独覆盖媒体 HTTP：新上传 201、重复内容 200、URL 可读、MIME/空文件/伪 JPEG/大小
+  拒绝、文件与数据库去重，以及所有失败路径不残留临时文件。
 
 ---
 
@@ -646,7 +692,8 @@ React 实现应以共享设计 token 和可复用业务组件表达上述设计�
 | 2.3 物种名录与 dry-run 匹配 | `species` migration、映射、只输出匹配方案。 | ID 匹配和失败可解释，不写 observations。 |
 | 2.4 批量确认写入 | `sessions` / `photos` migration、一次确认、部分成功。 | 事务和失败结果测试。 |
 | 2.5 未匹配照片 | 未匹配照片自动生成记录，并纳入同一批预览确认。 | 覆盖自动建记录与用户统一确认的边界用例。 |
-| 3. Web | 先完成并验收 FastAPI API，再按第 8 节实现 React 输入页、管理页和响应式布局。 | API 使用 HTTP 客户端验收；UI 覆盖两页完整流程及 1024/736/360px。 |
+| 3.1 FastAPI 媒体上传 | FastAPI 工厂、`POST /api/media`、哈希文件存储、photos 元数据与只读媒体 URL。 | HTTP 客户端覆盖 201/200、去重、校验、失败清理；不接 parse/React。 |
+| 3.2–3.x Web 后续 | 依次接 parse、observations/species API，再按第 8 节实现 React 输入页、管理页和响应式布局。 | API 逐切片验收；UI 覆盖两页完整流程及 1024/736/360px。 |
 | 4. 收尾 | README / STATUS / DECISIONS 更新，最终回归，打 `v2.0` tag。 | 文档、测试、发布状态一致。 |
 
 ---

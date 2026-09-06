@@ -19,6 +19,8 @@ ROOT_DIR = PACKAGE_DIR.parent
 # data/ is gitignored and still holds per-run JSONL traces.
 DATA_DIR = ROOT_DIR / "data"
 TRACES_DIR = DATA_DIR / "traces"
+MEDIA_DIR = ROOT_DIR / "media"
+MEDIA_MAX_UPLOAD_BYTES = 2 * 1024 * 1024
 
 # --- DeepSeek runtime model (OpenAI-compatible endpoint) ---
 DEEPSEEK_BASE_URL = "https://api.deepseek.com"

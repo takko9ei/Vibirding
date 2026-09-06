@@ -15,7 +15,8 @@
 - v2 **2.3 物种名录与 dry-run 匹配已实现、验证并提交**。
 - v2 **2.4 批量确认写入已实现、验证并提交**。
 - v2 **2.5 未匹配照片草稿已实现、验证并提交**。
-- Web 的 Neo Brutalism 双页与响应式方向已写入架构，当前等待文档 review；第 3 步尚未开始。
+- Web 的 Neo Brutalism 双页与响应式方向已确认。
+- v2 **3.1 FastAPI 媒体上传已实现并验证，当前等待 review**。
 
 ## v2 第 1 步已交付
 
@@ -39,6 +40,7 @@ JSONB `flags` 和可空 `user_id`。本切片未引入批量、照片、物种�
 | 2.3 名录与 dry-run 匹配测试 | 36/36 |
 | 2.4 批量确认写入测试 | 35/35 |
 | 2.5 未匹配照片草稿测试 | 30/30 |
+| 3.1 FastAPI 媒体上传 HTTP 测试 | 33/33 |
 | PostgreSQL 存储与 v1 Log 兼容语义 | 38/38 |
 | S1/S3/S4/S6 离线自检 | 101/101 |
 | v1 离线 eval | 13/13 |
@@ -96,6 +98,18 @@ JSONB `flags` 和可空 `user_id`。本切片未引入批量、照片、物种�
 - ambiguous / unmapped / unrecognized / failed 照片不会自动生成记录，原因继续保留在 warnings。
 - 本切片不修改输入对象、不调用批量写入服务，也不写 observations / sessions / photos。
 
+## v2 3.1 本次交付
+
+- 新增可注入的 FastAPI 应用工厂和 `POST /api/media`，接收 multipart 字段 `photo`。
+- JPEG 按 64 KiB 分块读取，边读边限制 2 MiB 大小并计算 SHA-256；文件保存为
+  `media/<hash>.jpg`，原始文件名不会参与磁盘路径。
+- `photos.content_hash` 作为幂等去重键：新内容返回 201，相同内容返回 200，并复用同一个
+  `media_id` 和媒体 URL。
+- `/media/<hash>.jpg` 提供只读访问；空文件、伪 JPEG、错误 MIME 和超限文件会返回明确的
+  4xx，并清理临时文件。
+- 本切片不调用懂鸟、不生成候选物种，也不写 sessions / observations；parse、记录管理和
+  React 仍未接入。
+
 保留的查询语义包括：大小写敏感子串、`%`/`_` 按普通字符处理、`start..end`
 日期范围、空日期排除、插入顺序和空库返回 `[]`。
 
@@ -106,6 +120,7 @@ JSONB `flags` 和可空 `user_id`。本切片未引入批量、照片、物种�
 3. `python -m alembic upgrade head` 升级 schema。
 4. `python scripts/import_ebird_taxonomy.py` 导入/更新物种名录。
 5. `python -m vibirding "<笔记或查询>"` 运行正式 CLI。
+6. `python -m uvicorn vibirding.api.app:create_app --factory --reload` 启动当前 Web API。
 
 PostgreSQL volume 持久保存数据；`docker compose down -v` 会删除该 volume，不应作为普通
 停止命令使用。
@@ -117,6 +132,7 @@ PostgreSQL volume 持久保存数据；`docker compose down -v` 会删除该 vol
 - `scripts/check_v2_text_split.py`、`check_v2_photo_preprocess.py`、
   `check_v2_taxonomy_matching.py`、`check_v2_batch_write.py`、
   `check_v2_unmatched_photos.py`：v2 批量切片验证。
+- `scripts/check_v2_media_api.py`：3.1 媒体上传 HTTP、文件和数据库验证。
 - `scripts/import_ebird_taxonomy.py`：从 eBird API 幂等导入当前物种名录。
 - `scripts/db_test_support.py`：测试 schema 隔离。
 - `scripts/run_s2.py`：Gemini 备用 provider 手动冒烟。
@@ -127,4 +143,4 @@ PostgreSQL volume 持久保存数据；`docker compose down -v` 会删除该 vol
 
 ## 当前 review 边界
 
-当前只 review Web 视觉、页面与响应式架构；通过后再开始第 3 步的第一个开发切片。
+当前只 review 3.1 FastAPI 媒体上传；通过并提交后再开始 3.2，不得提前接入其他 API 或 React。

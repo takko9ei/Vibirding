@@ -296,6 +296,30 @@ class PhotoMetadataInput(BaseModel):
         return value
 
 
+class StoredPhoto(BaseModel):
+    """A persisted content-addressed photo and its deduplication outcome."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    photo_id: UUID
+    content_hash: str
+    storage_path: str
+    original_filename: str
+    mime_type: str
+    size_bytes: int
+    created: bool
+
+
+class MediaUploadResponse(BaseModel):
+    """Public HTTP response for a newly stored or reused media object."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    media_id: UUID
+    hash: str
+    url: str
+
+
 class ConfirmedBatch(BaseModel):
     """One explicit user confirmation request for a complete draft batch."""
 

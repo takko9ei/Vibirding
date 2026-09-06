@@ -87,6 +87,20 @@ python scripts/import_ebird_taxonomy.py
 以上三条命令分别负责启动本地 PostgreSQL、把数据库结构升级到当前版本，以及从 eBird
 幂等导入当前物种名录。`DATABASE_URL` 已在 `.env.example` 中给出本地默认值。
 
+**启动当前 Web API（v2 3.1）**：
+
+```bash
+python -m uvicorn vibirding.api.app:create_app --factory --reload
+```
+
+启动后可打开 <http://127.0.0.1:8000/docs>，在交互文档中使用 `POST /api/media` 上传
+`photo`。当前只接受不超过 2 MiB 的 JPEG；文件按内容哈希去重，并可通过响应里的
+`/media/<hash>.jpg` 地址读取。命令行也可以这样上传：
+
+```bash
+curl.exe -F "photo=@D:\path\bird.jpg;type=image/jpeg" http://127.0.0.1:8000/api/media
+```
+
 **API key（在 `.env` 里配）**：
 
 | 变量               | 是否必需              | 用途                                     | 申请                             |
@@ -181,6 +195,7 @@ vibirding/          # 主包：cli 入口 + 循环 + 工具 + 记忆 + harness +
 ├── tools/          #   registry + read_log/range_check/bird_id/append_log
 ├── db/             #   SQLAlchemy session / ORM / repository
 ├── services/       #   文本/照片解析、名录匹配、预览组装、批量确认写入
+├── api/            #   FastAPI 工厂与媒体上传接口
 ├── memory/         #   log.py：保持 v1 append/query 外观
 ├── harness/        #   permissions / budget / trace
 └── llm/            #   deepseek_client（运行时）· mock（离线）· client（Gemini 备用）
@@ -199,7 +214,7 @@ docker-compose.yml  # 本地 PostgreSQL 服务
 - **2.1–2.3 已完成并提交**：文本拆分、照片预处理、物种名录与 dry-run 匹配。
 - **2.4 已完成并提交**：批量确认写入、部分成功和会话/照片关联。
 - **2.5 已完成并提交**：未匹配照片自动生成预览草稿。
-- **3 Web**：Neo Brutalism 双页与响应式方向已确认；等待架构 review 后再开始 FastAPI API、
-  React 输入预览页和记录管理页。
+- **3.1 已实现、待 review**：FastAPI 媒体上传、内容哈希去重、文件读取 URL。
+- **3.2–3.x**：依次接入其余 API，再实现 React 输入预览页、记录管理页和响应式布局。
 
 完整范围与切片顺序见 [docs/architecture.md](docs/architecture.md) §10。
