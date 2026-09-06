@@ -165,8 +165,8 @@ python -m vibirding "水元公园一只小鸟腹部橙红抖尾" --image bird.jp
 
 - **用户指定种名时不必然做季节核验**：如"7 月的红嘴鸥"（反常）——模型可能直接采信用户种名而不调 range_check 标 `season_unusual`（eval t04）。
 - **模糊量词不估值**："十几只 / 几只"这类会被留空，不折算成整数（eval t02）。
-- **正式 CLI 仍是单条笔记 → 单条记录**：批量文本、照片预处理、dry-run 匹配和确认写入服务
-  已经完成，但要等 2.5 和第 3 步 API/UI 后才成为用户入口。
+- **正式 CLI 仍是单条笔记 → 单条记录**：v2 批量处理服务链已经完成，但要等第 3 步
+  API/UI 后才成为用户入口。
 - **read_log 起步为空**：个人历史要攒；起步阶段鉴种主力是 bird_id + range_check。
 - **懂鸟免费额度约 50 次**：带图鉴种省着用。
 
@@ -180,7 +180,7 @@ vibirding/          # 主包：cli 入口 + 循环 + 工具 + 记忆 + harness +
 ├── agent/          #   loop.py 回合循环 · prompt.py 系统提示
 ├── tools/          #   registry + read_log/range_check/bird_id/append_log
 ├── db/             #   SQLAlchemy session / ORM / repository
-├── services/       #   文本拆分、照片预处理、物种名录、dry-run 匹配、批量确认写入
+├── services/       #   文本/照片解析、名录匹配、预览组装、批量确认写入
 ├── memory/         #   log.py：保持 v1 append/query 外观
 ├── harness/        #   permissions / budget / trace
 └── llm/            #   deepseek_client（运行时）· mock（离线）· client（Gemini 备用）
@@ -197,8 +197,8 @@ docker-compose.yml  # 本地 PostgreSQL 服务
 ## v2 后续计划
 
 - **2.1–2.3 已完成并提交**：文本拆分、照片预处理、物种名录与 dry-run 匹配。
-- **2.4 已实现待 review**：批量确认写入、部分成功和会话/照片关联。
-- **2.5**：未匹配照片自动生成记录。
+- **2.4 已完成并提交**：批量确认写入、部分成功和会话/照片关联。
+- **2.5 已实现待 review**：未匹配照片自动生成预览草稿。
 - **3 Web**：FastAPI API、React 输入预览页和记录管理页。
 
 完整范围与切片顺序见 [docs/architecture.md](docs/architecture.md) §10。

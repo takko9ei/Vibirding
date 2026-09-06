@@ -14,10 +14,10 @@
 **v2 的 PostgreSQL 存储底座已经完成。** PostgreSQL、SQLAlchemy、Alembic 和 psycopg 3
 已经替换 JSONL 持久化，并保留 v1 单条 CLI、工具契约与离线 eval 基线。
 
-**2.1–2.3 已完成并提交；2.4 批量确认写入已实现并通过验证，正在等待 review/commit。**
-本切片创建 `sessions` / `photos` 表和批量确认服务；一次确认后，以外层事务 + 每条
-savepoint 写入成功观测并精确返回失败项。review 前不得开始 2.5，亦不得提前实现文件上传/
-哈希落盘、FastAPI 或 React；2.4 消费已保存文件的照片元数据，不负责创建媒体文件。
+**2.1–2.4 已完成并提交；2.5 未匹配照片草稿已实现并通过验证，正在等待 review/commit。**
+本切片把已经解析到 `species_id`、但没有对应文本草稿的照片按物种合并，自动生成照片来源
+草稿并纳入统一预览；它不写数据库，最终仍须经过 2.4 的明确确认服务。review 前不得开始
+Web/API，也不得提前实现文件上传/哈希落盘、FastAPI 或 React。
 
 **不迁移旧数据。** v1 真实 `data/` 为空；这次是 schema migration，不是数据 migration。
 
@@ -127,6 +127,7 @@ Vibirding/
 │   │   ├── parse.py                      # 第 2.1/2.2 步：文本拆分和照片预处理
 │   │   ├── taxonomy.py                   # 第 2.3 步：名录导入与名称解析
 │   │   ├── matching.py                   # 第 2.3 步：只读图文匹配计划
+│   │   ├── assembly.py                   # 第 2.5 步：组装预览并生成未匹配照片草稿
 │   │   └── batch.py                      # 第 2.4 步：确认后的事务化批量写入
 │   └── api/                              # 后续：FastAPI app、路由和依赖
 ├── frontend/                             # 后续：React 应用
@@ -182,6 +183,10 @@ ParseResult
   unmatched_photos: list[PhotoDraft]  # 审计用：每项均已关联自动生成的草稿
   warnings: list[str]
   job_status: "completed"         # 当前同步；为未来异步保留字段
+
+PhotoDraft
+  photo_id: UUID
+  client_draft_id: str            # 该照片对应的自动生成草稿
 ```
 
 同种多张照片全部归属同一条 DraftObservation；一张照片多鸟时只使用懂鸟第一候选；
@@ -321,6 +326,7 @@ NULL。`photos` 行代表已经由上传阶段保存到文件系统的媒体元�
 | `tools/bird_id.py` | 保留 v1 `run()` 文本工具契约，并提供结构化 `identify()` 给批处理服务复用。 |
 | `services/matching.py` | 第 2.3 步：按 `species_id` 关联图文，只输出可解释的 dry-run 方案。 |
 | `services/batch.py` | 第 2.4 步：验证明确确认、锁定媒体、创建 session，以 savepoint 逐条写入并汇总 created/failed。 |
+| `services/assembly.py` | 第 2.5 步：消费 dry-run 结果，复制并补全草稿、合并未匹配照片，输出统一确认前的 `ParseResult`；不写库。 |
 | `api/` | 后续：FastAPI 输入验证、依赖注入、HTTP 状态码和响应；不直接嵌入业务 SQL。 |
 | `frontend/` | 后续：输入预览确认和记录管理；不重复后端规则。 |
 
@@ -452,7 +458,30 @@ BatchWriteService.confirm(batch: ConfirmedBatch) -> BatchWriteResult
 - 事务外异常回滚整个批次；只有已归一化的逐条领域/约束错误允许部分成功。2.4 不为未使用
   的 media 自动建 observation，那是 2.5 的职责。
 
-### 6.7 HTTP API 契约（后续第 3 步）
+### 6.7 第 2.5 步未匹配照片草稿契约
+
+```python
+ParseAssemblyService.assemble(
+    drafts: list[DraftObservation],
+    photos: list[PhotoIdentification],
+) -> ParseResult
+```
+
+- 服务内部调用第 2.3 步 dry-run 匹配，并复制输入对象后组装结果；不得修改调用方的草稿/
+  照片，也不得写数据库。重复 `client_draft_id` 或重复 `photo_id` 整批拒绝。
+- 已解析文本草稿补上 `species_id`；匹配成功的照片 ID 归入对应草稿。无法解析或有歧义的
+  文本草稿标记 `needs_confirmation=True`，匹配失败原因继续保留在 `warnings`。
+- 只有状态为 `unmatched` 且已经解析到唯一 `species_id` 的照片才能自动生成草稿；unmapped、
+  ambiguous、unrecognized、failed 照片不得猜测物种或创建记录。
+- 同一 `species_id` 的多张未匹配照片合并到一条草稿，顺序由该物种第一张照片在输入中的
+  位置决定；草稿 ID 使用不与现有 ID 冲突的 `photo-draft-N`。
+- 自动草稿 `source="bird_id"`、`count=None`、`confidence=None`，带
+  `auto_created_from_unmatched_photo` flag，并固定 `needs_confirmation=True`。地点、日期、时段
+  只有在所有文本草稿的该字段完全一致时才继承，否则留空，禁止取第一条猜测共享上下文。
+- `unmatched_photos` 为每张自动处理的照片保留 `photo_id -> client_draft_id` 对应关系；生成的
+  草稿与普通文本草稿一起进入统一预览。2.5 本身不调用 2.4 写入服务，用户明确确认后才落库。
+
+### 6.8 HTTP API 契约（后续第 3 步）
 
 ```text
 POST   /api/media

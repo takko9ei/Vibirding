@@ -3,7 +3,7 @@
 > 本文件只做冷启动进度摘要。完整目录、数据结构、契约和实施边界以
 > [architecture.md](architecture.md) 为唯一事实来源。
 
-最后更新：2026-09-05。
+最后更新：2026-09-06。
 
 ## 当前状态
 
@@ -13,7 +13,8 @@
 - v2 **2.1 文本拆分已实现、验证并提交**。
 - v2 **2.2 照片预处理已实现、验证并提交**。
 - v2 **2.3 物种名录与 dry-run 匹配已实现、验证并提交**。
-- v2 **2.4 批量确认写入已实现并通过验证，正在等待 review/commit**；2.5 尚未开始。
+- v2 **2.4 批量确认写入已实现、验证并提交**。
+- v2 **2.5 未匹配照片草稿已实现并通过验证，正在等待 review/commit**。
 
 ## v2 第 1 步已交付
 
@@ -36,6 +37,7 @@ JSONB `flags` 和可空 `user_id`。本切片未引入批量、照片、物种�
 | 2.2 照片预处理独立离线测试 | 26/26 |
 | 2.3 名录与 dry-run 匹配测试 | 36/36 |
 | 2.4 批量确认写入测试 | 35/35 |
+| 2.5 未匹配照片草稿测试 | 30/30 |
 | PostgreSQL 存储与 v1 Log 兼容语义 | 38/38 |
 | S1/S3/S4/S6 离线自检 | 101/101 |
 | v1 离线 eval | 13/13 |
@@ -82,6 +84,17 @@ JSONB `flags` 和可空 `user_id`。本切片未引入批量、照片、物种�
   `created[]` / `failed[]` 并记录 completed / partial / failed 状态。
 - 本切片只关联已存在的照片元数据，不读写媒体文件，也不实现 2.5 的未匹配照片自动建记录。
 
+## v2 2.5 本次交付
+
+- 新增 `ParseResult` / `PhotoDraft` 和 `ParseAssemblyService`，把文本草稿、匹配照片及自动生成
+  的照片来源草稿组装成统一确认前预览。
+- 已匹配照片归入原文本草稿；已可靠解析但文字未提及的照片按 `species_id` 合并，同种多图
+  只生成一条 `photo-draft-N` 草稿。
+- 自动草稿不猜数量或聚合置信度，并始终标记为需要用户确认；公共地点、日期和时段只有在
+  全部文本草稿一致时才继承。
+- ambiguous / unmapped / unrecognized / failed 照片不会自动生成记录，原因继续保留在 warnings。
+- 本切片不修改输入对象、不调用批量写入服务，也不写 observations / sessions / photos。
+
 保留的查询语义包括：大小写敏感子串、`%`/`_` 按普通字符处理、`start..end`
 日期范围、空日期排除、插入顺序和空库返回 `[]`。
 
@@ -101,7 +114,8 @@ PostgreSQL volume 持久保存数据；`docker compose down -v` 会删除该 vol
 - `scripts/check_s1.py`、`check_s3.py`、`check_s4.py`、`check_s5.py`、`check_s6.py`：分切片回归。
 - `scripts/check_v2_db.py`：真实 migration 验证。
 - `scripts/check_v2_text_split.py`、`check_v2_photo_preprocess.py`、
-  `check_v2_taxonomy_matching.py`、`check_v2_batch_write.py`：v2 批量切片验证。
+  `check_v2_taxonomy_matching.py`、`check_v2_batch_write.py`、
+  `check_v2_unmatched_photos.py`：v2 批量切片验证。
 - `scripts/import_ebird_taxonomy.py`：从 eBird API 幂等导入当前物种名录。
 - `scripts/db_test_support.py`：测试 schema 隔离。
 - `scripts/run_s2.py`：Gemini 备用 provider 手动冒烟。
@@ -112,4 +126,4 @@ PostgreSQL volume 持久保存数据；`docker compose down -v` 会删除该 vol
 
 ## 当前 review 边界
 
-当前只 review 2.4 批量确认写入；通过后提交，再开始 2.5 未匹配照片处理。
+当前只 review 2.5 未匹配照片草稿；通过后提交，再开始 Web/API。

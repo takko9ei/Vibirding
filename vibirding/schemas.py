@@ -242,6 +242,26 @@ class DryRunMatchPlan(BaseModel):
     warnings: list[str] = Field(default_factory=list)
 
 
+class PhotoDraft(BaseModel):
+    """Audit link from an unmatched photo to its generated preview draft."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    photo_id: UUID
+    client_draft_id: str
+
+
+class ParseResult(BaseModel):
+    """Complete pre-confirmation preview assembled from text and photos."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    draft_observations: list[DraftObservation]
+    unmatched_photos: list[PhotoDraft] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)
+    job_status: Literal["completed"] = "completed"
+
+
 class PhotoMetadataInput(BaseModel):
     """Metadata for a file already saved by the future media upload service."""
 
