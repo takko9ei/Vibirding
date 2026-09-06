@@ -14,10 +14,10 @@
 **v2 的 PostgreSQL 存储底座已经完成。** PostgreSQL、SQLAlchemy、Alembic 和 psycopg 3
 已经替换 JSONL 持久化，并保留 v1 单条 CLI、工具契约与离线 eval 基线。
 
-**2.1–2.5 已完成、验证并提交，Web 视觉与响应式方向也已确认。3.1 FastAPI 媒体上传已经
-实现并通过回归，当前等待 review。** 本切片建立 FastAPI 工厂和 `POST /api/media`，完成
-单张 JPEG 的大小/格式校验、内容哈希去重、文件保存、photos 元数据写入和可访问 URL；
-review 前不得开始 parse、observations、species API、CORS 或 React。
+**2.1–2.5 和 3.1 已完成、验证并提交，Web 视觉与响应式方向也已确认。3.2 FastAPI
+解析预览已经实现并通过回归，当前等待 review。** 本切片建立 `POST /api/parse`，把已完成的
+文本拆分、照片预处理、名录匹配和预览组装串成一个同步、无持久化副作用的 HTTP 能力；
+review 前不得开始确认写入、观测 CRUD、species API、CORS 或 React。
 
 **不迁移旧数据。** v1 真实 `data/` 为空；这次是 schema migration，不是数据 migration。
 
@@ -129,9 +129,10 @@ Vibirding/
 │   │   ├── matching.py                   # 第 2.3 步：只读图文匹配计划
 │   │   ├── assembly.py                   # 第 2.5 步：组装预览并生成未匹配照片草稿
 │   │   ├── batch.py                      # 第 2.4 步：确认后的事务化批量写入
-│   │   └── media.py                      # 第 3.1 步：哈希、校验、文件保存和去重
+│   │   ├── media.py                      # 第 3.1 步：哈希、校验、文件保存和去重
+│   │   └── preview.py                    # 第 3.2 步：读取媒体并编排解析预览流水线
 │   └── api/
-│       └── app.py                        # 第 3.1 步：FastAPI 工厂和媒体路由
+│       └── app.py                        # 第 3.1/3.2 步：FastAPI 工厂、媒体和解析路由
 ├── frontend/                             # 后续：React 应用
 ├── evals/                                # 保留 v1 eval，后续新增 v2 用例
 └── scripts/                              # 开发期自检与冒烟脚本
@@ -281,6 +282,10 @@ StoredPhoto
 
 MediaUploadResponse
   media_id / hash / url
+
+ParseRequest
+  text: str
+  media_ids: list[UUID]
 ```
 
 ### 4.3 PostgreSQL 表设计
@@ -336,6 +341,7 @@ NULL。`photos` 行代表已经由上传阶段保存到文件系统的媒体元�
 | `services/matching.py` | 第 2.3 步：按 `species_id` 关联图文，只输出可解释的 dry-run 方案。 |
 | `services/batch.py` | 第 2.4 步：验证明确确认、锁定媒体、创建 session，以 savepoint 逐条写入并汇总 created/failed。 |
 | `services/assembly.py` | 第 2.5 步：消费 dry-run 结果，复制并补全草稿、合并未匹配照片，输出统一确认前的 `ParseResult`；不写库。 |
+| `services/preview.py` | 第 3.2 步：校验并读取 `media_ids`，按请求顺序构造照片输入，编排拆分、识别和预览组装；只读数据库。 |
 | `api/app.py` | 第 3.1 步起：FastAPI 应用工厂、路由装配、依赖注入和 HTTP 错误映射；不直接嵌入业务 SQL。 |
 | `frontend/` | 后续：输入预览确认和记录管理；不重复后端规则。 |
 
@@ -545,6 +551,37 @@ multipart field: photo
 - 文件系统与 PostgreSQL 无法共享事务：文件写成功而 DB 发生不可恢复错误时可能留下哈希命名
   的孤儿文件，后续清理任务可安全识别；不得声称数据库 rollback 能删除文件。
 
+### 6.10 第 3.2 步 FastAPI 解析预览契约
+
+```python
+ParsePreviewService.parse(
+    text: str,
+    media_ids: list[UUID],
+) -> ParseResult
+
+POST /api/parse
+{"text": str, "media_ids": list[UUID]}
+-> 200 ParseResult
+```
+
+- `ParseRequest` 禁止额外字段，`text` 与 `media_ids` 都必须出现；允许纯文本或纯照片，但二者
+  不能同时为空。一个请求内 `media_ids` 不得重复，结构错误由 FastAPI/Pydantic 返回 422。
+- 所有媒体必须先从 `photos` 表查到，未知 ID 返回 404，并且必须发生在调用 DeepSeek 或懂鸟
+  之前。数据库结果重新按请求中的 ID 顺序排列，照片处理顺序不能依赖 SQL 返回顺序。
+- 有非空文本时只调用一次 `TextSplitService.split()`；纯照片请求不调用 LLM。每个媒体 ID 使用
+  数据库中的 `storage_path` 构造 `PhotoInput`，再依次调用 `PhotoPreprocessService`，最后由
+  `ParseAssemblyService` 完成名录解析、图文匹配和未匹配照片自动建草稿。
+- 整个端点同步执行并返回 `job_status="completed"`。单张照片无法读取、未识别或懂鸟失败时，
+  沿用 2.2/2.5 语义，以 warning/状态进入成功的 200 预览，不让其他照片或文本草稿丢失。
+- 模型调用失败或模型没有返回合规拆分结构时返回 502；请求自身的批次语义错误返回 400。
+  已存在但文件缺失的媒体不伪装成 404，而是作为该照片的识别失败出现在预览 warning 中。
+- `create_app(session_factory=None, media_dir=None, parse_service=None)` 允许测试注入完整预览服务；
+  正式服务只在首次调用 `/api/parse` 时惰性创建 DeepSeek/懂鸟流水线，因此缺少 AI key 不应
+  阻止独立的 `/api/media` 上传能力启动。
+- 3.2 只读取 `photos` / `species`：不缓存识别候选，不修改媒体元数据，不创建 session 或
+  observation。重复 parse 可以重新计算但不能产生数据库副作用；确认写入仍只属于后续
+  `POST /api/observations`。
+
 ---
 
 ## 7. 批量处理与权限流程（后续第 2 步）
@@ -678,6 +715,8 @@ React 实现应以共享设计 token 和可复用业务组件表达上述设计�
 - 在 1024px、736px、360px 验证响应式布局、键盘操作和可见焦点，不得出现页面级横向溢出。
 - 3.1 单独覆盖媒体 HTTP：新上传 201、重复内容 200、URL 可读、MIME/空文件/伪 JPEG/大小
   拒绝、文件与数据库去重，以及所有失败路径不残留临时文件。
+- 3.2 单独覆盖解析 HTTP：纯文本、纯照片、图文匹配、未匹配照片建草稿、单图失败 warning、
+  请求顺序、未知/重复媒体、上游模型失败，并确认 photos/sessions/observations 均无写入变化。
 
 ---
 
@@ -693,7 +732,8 @@ React 实现应以共享设计 token 和可复用业务组件表达上述设计�
 | 2.4 批量确认写入 | `sessions` / `photos` migration、一次确认、部分成功。 | 事务和失败结果测试。 |
 | 2.5 未匹配照片 | 未匹配照片自动生成记录，并纳入同一批预览确认。 | 覆盖自动建记录与用户统一确认的边界用例。 |
 | 3.1 FastAPI 媒体上传 | FastAPI 工厂、`POST /api/media`、哈希文件存储、photos 元数据与只读媒体 URL。 | HTTP 客户端覆盖 201/200、去重、校验、失败清理；不接 parse/React。 |
-| 3.2–3.x Web 后续 | 依次接 parse、observations/species API，再按第 8 节实现 React 输入页、管理页和响应式布局。 | API 逐切片验收；UI 覆盖两页完整流程及 1024/736/360px。 |
+| 3.2 FastAPI 解析预览 | `POST /api/parse` 编排已有拆分、识别、匹配与组装服务，只读媒体和名录。 | HTTP 客户端覆盖完整预览、失败降级和零持久化副作用；不接确认写入/React。 |
+| 3.3–3.x Web 后续 | 依次接 observations/species API，再按第 8 节实现 React 输入页、管理页和响应式布局。 | API 逐切片验收；UI 覆盖两页完整流程及 1024/736/360px。 |
 | 4. 收尾 | README / STATUS / DECISIONS 更新，最终回归，打 `v2.0` tag。 | 文档、测试、发布状态一致。 |
 
 ---

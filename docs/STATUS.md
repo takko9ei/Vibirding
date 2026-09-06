@@ -16,7 +16,8 @@
 - v2 **2.4 批量确认写入已实现、验证并提交**。
 - v2 **2.5 未匹配照片草稿已实现、验证并提交**。
 - Web 的 Neo Brutalism 双页与响应式方向已确认。
-- v2 **3.1 FastAPI 媒体上传已实现并验证，当前等待 review**。
+- v2 **3.1 FastAPI 媒体上传已实现、验证并提交**。
+- v2 **3.2 FastAPI 解析预览已实现并验证，当前等待 review**。
 
 ## v2 第 1 步已交付
 
@@ -41,6 +42,7 @@ JSONB `flags` 和可空 `user_id`。本切片未引入批量、照片、物种�
 | 2.4 批量确认写入测试 | 35/35 |
 | 2.5 未匹配照片草稿测试 | 30/30 |
 | 3.1 FastAPI 媒体上传 HTTP 测试 | 33/33 |
+| 3.2 FastAPI 解析预览 HTTP 测试 | 38/38 |
 | PostgreSQL 存储与 v1 Log 兼容语义 | 38/38 |
 | S1/S3/S4/S6 离线自检 | 101/101 |
 | v1 离线 eval | 13/13 |
@@ -110,6 +112,17 @@ JSONB `flags` 和可空 `user_id`。本切片未引入批量、照片、物种�
 - 本切片不调用懂鸟、不生成候选物种，也不写 sessions / observations；parse、记录管理和
   React 仍未接入。
 
+## v2 3.2 本次交付
+
+- 新增 `POST /api/parse`，接收文本和 3.1 已上传的 `media_ids`，同步返回统一 `ParseResult`
+  预览；支持图文混合、纯文本和纯照片输入。
+- 新增只读 `ParsePreviewService`，先验证全部媒体，再按请求顺序串联文本拆分、懂鸟照片预处理、
+  eBird 名录映射、图文匹配和未匹配照片草稿组装。
+- 未知媒体在任何外部调用前返回 404；重复 ID、空请求和错误结构返回 422；模型或结构化拆分
+  失败返回 502。单张照片缺失、未识别或懂鸟失败不会让整批失败，而是进入 warnings。
+- 默认 AI 流水线惰性创建，因此只使用媒体上传时不要求提前初始化 DeepSeek/懂鸟 provider。
+- parse 不缓存识别候选，不修改 photos，也不写 sessions / observations；用户确认写入仍未接入。
+
 保留的查询语义包括：大小写敏感子串、`%`/`_` 按普通字符处理、`start..end`
 日期范围、空日期排除、插入顺序和空库返回 `[]`。
 
@@ -133,6 +146,7 @@ PostgreSQL volume 持久保存数据；`docker compose down -v` 会删除该 vol
   `check_v2_taxonomy_matching.py`、`check_v2_batch_write.py`、
   `check_v2_unmatched_photos.py`：v2 批量切片验证。
 - `scripts/check_v2_media_api.py`：3.1 媒体上传 HTTP、文件和数据库验证。
+- `scripts/check_v2_parse_api.py`：3.2 解析预览 HTTP、完整编排和零写入验证。
 - `scripts/import_ebird_taxonomy.py`：从 eBird API 幂等导入当前物种名录。
 - `scripts/db_test_support.py`：测试 schema 隔离。
 - `scripts/run_s2.py`：Gemini 备用 provider 手动冒烟。
@@ -143,4 +157,4 @@ PostgreSQL volume 持久保存数据；`docker compose down -v` 会删除该 vol
 
 ## 当前 review 边界
 
-当前只 review 3.1 FastAPI 媒体上传；通过并提交后再开始 3.2，不得提前接入其他 API 或 React。
+当前只 review 3.2 FastAPI 解析预览；通过并提交后再开始 3.3，不得提前接入其他 API 或 React。

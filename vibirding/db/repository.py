@@ -248,6 +248,15 @@ class PhotoRepository:
             raise RuntimeError("photo upsert did not return or find a row")
         return existing, False
 
+    def get_many(self, photo_ids: list[uuid.UUID]) -> dict[uuid.UUID, PhotoRow]:
+        """Read existing photos by ID without locking or changing ownership."""
+        if not photo_ids:
+            return {}
+        rows = self._session.scalars(
+            select(PhotoRow).where(PhotoRow.id.in_(photo_ids))
+        ).all()
+        return {row.id: row for row in rows}
+
     def lock_many(self, photo_ids: list[uuid.UUID]) -> dict[uuid.UUID, PhotoRow]:
         if not photo_ids:
             return {}

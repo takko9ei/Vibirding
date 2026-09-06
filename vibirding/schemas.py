@@ -13,7 +13,14 @@ from __future__ import annotations
 from typing import Literal
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, StrictBool, field_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    StrictBool,
+    field_validator,
+    model_validator,
+)
 
 
 class ToolCall(BaseModel):
@@ -318,6 +325,23 @@ class MediaUploadResponse(BaseModel):
     media_id: UUID
     hash: str
     url: str
+
+
+class ParseRequest(BaseModel):
+    """HTTP input for a side-effect-free parse preview."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    text: str
+    media_ids: list[UUID]
+
+    @model_validator(mode="after")
+    def require_content_and_unique_media(self) -> "ParseRequest":
+        if not self.text.strip() and not self.media_ids:
+            raise ValueError("text and media_ids cannot both be empty")
+        if len(set(self.media_ids)) != len(self.media_ids):
+            raise ValueError("media_ids must be unique within a request")
+        return self
 
 
 class ConfirmedBatch(BaseModel):

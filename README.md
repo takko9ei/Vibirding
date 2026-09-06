@@ -87,7 +87,7 @@ python scripts/import_ebird_taxonomy.py
 以上三条命令分别负责启动本地 PostgreSQL、把数据库结构升级到当前版本，以及从 eBird
 幂等导入当前物种名录。`DATABASE_URL` 已在 `.env.example` 中给出本地默认值。
 
-**启动当前 Web API（v2 3.1）**：
+**启动当前 Web API（v2 3.1–3.2）**：
 
 ```bash
 python -m uvicorn vibirding.api.app:create_app --factory --reload
@@ -100,6 +100,19 @@ python -m uvicorn vibirding.api.app:create_app --factory --reload
 ```bash
 curl.exe -F "photo=@D:\path\bird.jpg;type=image/jpeg" http://127.0.0.1:8000/api/media
 ```
+
+上传得到 `media_id` 后，可以在交互文档中调用 `POST /api/parse`：
+
+```json
+{
+  "text": "今天在井之头公园看到3只灰喜鹊和两只鸬鹚",
+  "media_ids": ["上传接口返回的 media_id"]
+}
+```
+
+它会同步完成文本拆分、照片鉴种、物种名录匹配并返回确认前预览。这个接口不会写入观测；
+当前还需要等后续确认写入 API，才能从 Web 流程正式保存记录。真实图文解析需要在 `.env`
+配置 `DEEPSEEK_API_KEY`，带照片时还需要 `HHO_API_KEY`。
 
 **API key（在 `.env` 里配）**：
 
@@ -214,7 +227,8 @@ docker-compose.yml  # 本地 PostgreSQL 服务
 - **2.1–2.3 已完成并提交**：文本拆分、照片预处理、物种名录与 dry-run 匹配。
 - **2.4 已完成并提交**：批量确认写入、部分成功和会话/照片关联。
 - **2.5 已完成并提交**：未匹配照片自动生成预览草稿。
-- **3.1 已实现、待 review**：FastAPI 媒体上传、内容哈希去重、文件读取 URL。
-- **3.2–3.x**：依次接入其余 API，再实现 React 输入预览页、记录管理页和响应式布局。
+- **3.1 已完成并提交**：FastAPI 媒体上传、内容哈希去重、文件读取 URL。
+- **3.2 已实现、待 review**：FastAPI 同步解析预览，串联文本、照片、名录匹配和草稿组装。
+- **3.3–3.x**：依次接入确认写入及管理 API，再实现 React 输入预览页、记录管理页和响应式布局。
 
 完整范围与切片顺序见 [docs/architecture.md](docs/architecture.md) §10。
