@@ -18,7 +18,8 @@
 - Web 的 Neo Brutalism 双页与响应式方向已确认。
 - v2 **3.1 FastAPI 媒体上传已实现、验证并提交**。
 - v2 **3.2 FastAPI 解析预览已实现、验证并提交**。
-- v2 **3.3 FastAPI 批量确认写入已实现并验证，当前等待 review**。
+- v2 **3.3 FastAPI 批量确认写入已实现、验证并提交**。
+- v2 **3.4 FastAPI 观测读取已实现并验证，当前等待 review**。
 
 ## v2 第 1 步已交付
 
@@ -45,6 +46,7 @@ JSONB `flags` 和可空 `user_id`。本切片未引入批量、照片、物种�
 | 3.1 FastAPI 媒体上传 HTTP 测试 | 33/33 |
 | 3.2 FastAPI 解析预览 HTTP 测试 | 38/38 |
 | 3.3 FastAPI 批量确认写入 HTTP 测试 | 50/50 |
+| 3.4 FastAPI 观测读取 HTTP 测试 | 42/42 |
 | PostgreSQL 存储与 v1 Log 兼容语义 | 38/38 |
 | S1/S3/S4/S6 离线自检 | 101/101 |
 | v1 离线 eval | 13/13 |
@@ -137,6 +139,17 @@ JSONB `flags` 和可空 `user_id`。本切片未引入批量、照片、物种�
 - 统一了纯照片流程：没有文本但存在媒体时允许确认，session 如实保存空原文；确认写入不会
   删除媒体文件。本切片仍不实现列表、详情、编辑、删除或 species 查询。
 
+## v2 3.4 本次交付
+
+- 新增 `GET /api/observations`，默认返回最新 20 条、最多 100 条；支持地点/物种子串、起止
+  日期和组合筛选，返回 `{items}` 列表信封。
+- 新增 `GET /api/observations/{id}`，返回完整单条字段、关联照片安全元数据以及可空的 session
+  原始整篇笔记和状态；v1 单条记录不会伪造 session。
+- 管理列表使用独立 `sequence_no DESC` 读模型，不改变 v1 `Log.query()` 的正序兼容语义；
+  列表以一次批量照片查询生成 photo_count/thumbnail，避免 N+1。
+- API 不公开 storage_path、provider 候选字段或 user_id；照片 URL 可直接读取，照片按内容哈希
+  稳定排序。所有读取均不调用 AI 或外部网络、不修改数据库和媒体文件。
+
 保留的查询语义包括：大小写敏感子串、`%`/`_` 按普通字符处理、`start..end`
 日期范围、空日期排除、插入顺序和空库返回 `[]`。
 
@@ -162,6 +175,7 @@ PostgreSQL volume 持久保存数据；`docker compose down -v` 会删除该 vol
 - `scripts/check_v2_media_api.py`：3.1 媒体上传 HTTP、文件和数据库验证。
 - `scripts/check_v2_parse_api.py`：3.2 解析预览 HTTP、完整编排和零写入验证。
 - `scripts/check_v2_observations_api.py`：3.3 确认写入 HTTP、事务和部分成功验证。
+- `scripts/check_v2_observation_reads_api.py`：3.4 观测列表、筛选、详情和零副作用验证。
 - `scripts/import_ebird_taxonomy.py`：从 eBird API 幂等导入当前物种名录。
 - `scripts/db_test_support.py`：测试 schema 隔离。
 - `scripts/run_s2.py`：Gemini 备用 provider 手动冒烟。
@@ -172,4 +186,4 @@ PostgreSQL volume 持久保存数据；`docker compose down -v` 会删除该 vol
 
 ## 当前 review 边界
 
-当前只 review 3.3 FastAPI 批量确认写入；通过并提交后再开始 3.4，不得提前接入其他 API 或 React。
+当前只 review 3.4 FastAPI 观测读取；通过并提交后再开始 3.5，不得提前接入其他 API 或 React。

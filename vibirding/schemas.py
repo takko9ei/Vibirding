@@ -10,6 +10,7 @@ All models use pydantic for validation.
 
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Literal
 from uuid import UUID
 
@@ -405,6 +406,66 @@ class BatchWriteResult(BaseModel):
     session_id: UUID
     created: list[CreatedObservation] = Field(default_factory=list)
     failed: list[FailedObservation] = Field(default_factory=list)
+
+
+class ObservationSummary(BaseModel):
+    """Public list representation of one persisted observation."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    observation_id: UUID
+    timestamp: datetime
+    species_label: str | None = None
+    species_id: UUID | None = None
+    count: int | None = None
+    place: str | None = None
+    obs_date: str | None = None
+    time_of_day: str | None = None
+    photo_count: int
+    thumbnail_url: str | None = None
+
+
+class ObservationPhoto(BaseModel):
+    """Safe public metadata for one photo linked to an observation."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    media_id: UUID
+    url: str
+    original_filename: str
+    mime_type: str
+    size_bytes: int
+
+
+class ObservationSessionInfo(BaseModel):
+    """Public audit context for the confirmed batch that created a record."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    session_id: UUID
+    created_at: datetime
+    raw_text: str
+    status: str
+
+
+class ObservationDetail(ObservationSummary):
+    """Complete management-page representation of one observation."""
+
+    behavior: str | None = None
+    raw_note: str
+    confidence: float | None = None
+    source: str
+    flags: list[str] = Field(default_factory=list)
+    photos: list[ObservationPhoto] = Field(default_factory=list)
+    session: ObservationSessionInfo | None = None
+
+
+class ObservationListResponse(BaseModel):
+    """Extensible envelope for the current bounded observation list."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    items: list[ObservationSummary]
 
 
 class TraceEvent(BaseModel):

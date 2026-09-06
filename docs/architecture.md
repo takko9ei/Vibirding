@@ -14,10 +14,10 @@
 **v2 的 PostgreSQL 存储底座已经完成。** PostgreSQL、SQLAlchemy、Alembic 和 psycopg 3
 已经替换 JSONL 持久化，并保留 v1 单条 CLI、工具契约与离线 eval 基线。
 
-**2.1–2.5、3.1 和 3.2 已完成、验证并提交，Web 视觉与响应式方向也已确认。3.3 FastAPI
-批量确认写入已经实现并通过回归，当前等待 review。** 本切片建立 `POST /api/observations`，
-把明确确认的预览草稿交给既有 `BatchWriteService` 事务化保存；review 前不得开始观测列表/
-详情/编辑/删除、species API、CORS 或 React。
+**2.1–2.5 和 3.1–3.3 已完成、验证并提交，Web 视觉与响应式方向也已确认。3.4 FastAPI
+观测读取已经实现并通过回归，当前等待 review。** 本切片建立观测列表/筛选和单条详情，只读
+返回前端需要的照片与 session 上下文；review 前不得开始编辑、删除、species API、CORS 或
+React。
 
 **不迁移旧数据。** v1 真实 `data/` 为空；这次是 schema migration，不是数据 migration。
 
@@ -130,9 +130,10 @@ Vibirding/
 │   │   ├── assembly.py                   # 第 2.5 步：组装预览并生成未匹配照片草稿
 │   │   ├── batch.py                      # 第 2.4 步：确认后的事务化批量写入
 │   │   ├── media.py                      # 第 3.1 步：哈希、校验、文件保存和去重
-│   │   └── preview.py                    # 第 3.2 步：读取媒体并编排解析预览流水线
+│   │   ├── preview.py                    # 第 3.2 步：读取媒体并编排解析预览流水线
+│   │   └── observations.py               # 第 3.4 步：观测列表/详情只读模型
 │   └── api/
-│       └── app.py                        # 第 3.1–3.3 步：FastAPI 工厂和当前 HTTP 路由
+│       └── app.py                        # 第 3.1–3.4 步：FastAPI 工厂和当前 HTTP 路由
 ├── frontend/                             # 后续：React 应用
 ├── evals/                                # 保留 v1 eval，后续新增 v2 用例
 └── scripts/                              # 开发期自检与冒烟脚本
@@ -292,6 +293,23 @@ ObservationCreateRequest
   media_ids: list[UUID]
   observations: list[DraftObservation]
   confirmed: StrictBool
+
+ObservationSummary
+  observation_id / timestamp / species_label / species_id / count
+  place / obs_date / time_of_day / photo_count / thumbnail_url
+
+ObservationPhoto
+  media_id / url / original_filename / mime_type / size_bytes
+
+ObservationSessionInfo
+  session_id / created_at / raw_text / status
+
+ObservationDetail extends ObservationSummary
+  behavior / raw_note / confidence / source / flags
+  photos[] / session
+
+ObservationListResponse
+  items: list[ObservationSummary]
 ```
 
 ### 4.3 PostgreSQL 表设计
@@ -514,7 +532,7 @@ POST   /api/parse
 POST   /api/observations
        {text, media_ids[], observations[], confirmed} -> {session_id, created[], failed[]}
 
-GET    /api/observations?limit=&place=&species=&date_from=
+GET    /api/observations?limit=&place=&species=&date_from=&date_to=
 GET    /api/observations/{id}
 PATCH  /api/observations/{id}
 DELETE /api/observations/{id}
@@ -620,6 +638,40 @@ POST /api/observations
   HTTP 测试注入固定时间/ID 的写入服务；正式应用直接用同一个 session factory 构造默认
   `BatchWriteService`。该 POST 有副作用，不承诺无 idempotency key 的自动重试安全，前端后续
   必须在提交期间禁用重复点击。
+
+### 6.12 第 3.4 步 FastAPI 观测读取契约
+
+```python
+GET /api/observations
+    ?limit=20
+    &place=<substring>
+    &species=<substring>
+    &date_from=YYYY-MM-DD
+    &date_to=YYYY-MM-DD
+-> 200 ObservationListResponse
+
+GET /api/observations/{observation_id}
+-> 200 ObservationDetail
+-> 404
+```
+
+- 列表默认 `limit=20`，范围 1–100；参数类型或日期格式错误返回 422，`date_from > date_to`
+  返回 400。空白 place/species 等同未筛选；非空 place/species 对已确认时保存的展示文本做
+  大小写敏感子串过滤，并将 `%` / `_` 当普通字符，不能改变 v1 查询语义。
+- 列表按 `observations.sequence_no DESC` 返回最新记录，独立于 v1 `Log.query()` 的正序兼容
+  契约。3.4 不引入 offset/cursor/total count；响应使用 `{items: [...]}` 信封，给后续分页保留
+  扩展空间，但 `items` 只表示本次实际返回值。
+- `ObservationSummary` 只提供管理列表所需字段；`species` 数据库兼容列对外命名为
+  `species_label`。`photo_count` 是关联照片数，`thumbnail_url` 取按内容哈希稳定排序后的首张
+  照片；没有照片时分别为 0 / null。
+- 详情补充单条 `raw_note`、behavior/confidence/source/flags、全部关联照片和可空 session。
+  session 只公开 ID、创建时间、整篇 `raw_text` 和状态；v1 单条记录返回 `session=null`。
+- 照片只公开 `media_id`、`/media/<hash>.jpg` URL、原始文件名、MIME 和大小；不得泄露
+  `storage_path`、候选 provider 字段、session/observation 外键或 `user_id`。照片按
+  `content_hash` 稳定排序；当前 schema 不承诺还原原始上传顺序。
+- 列表使用一次观测查询和一次批量照片查询，禁止逐条 N+1 读取；详情允许分别读取一条观测、
+  其照片和可选 session。两个端点都直接查询 PostgreSQL，不调用 LLM/懂鸟/eBird 网络，不修改
+  任意数据库行或媒体文件。
 
 ---
 
@@ -758,6 +810,8 @@ React 实现应以共享设计 token 和可复用业务组件表达上述设计�
   请求顺序、未知/重复媒体、上游模型失败，并确认 photos/sessions/observations 均无写入变化。
 - 3.3 单独覆盖确认写入 HTTP：未确认零写入、完整成功、部分/全部失败、纯文本/纯照片、
   未知/已认领/重复媒体、严格布尔确认和 created/failed 稳定响应。
+- 3.4 单独覆盖观测读取 HTTP：最新优先、limit/地点/物种/日期筛选、字面量通配符、空结果、
+  详情照片/session、v1 无 session 记录、404/400/422、内部字段不泄露和零写入副作用。
 
 ---
 
@@ -775,7 +829,8 @@ React 实现应以共享设计 token 和可复用业务组件表达上述设计�
 | 3.1 FastAPI 媒体上传 | FastAPI 工厂、`POST /api/media`、哈希文件存储、photos 元数据与只读媒体 URL。 | HTTP 客户端覆盖 201/200、去重、校验、失败清理；不接 parse/React。 |
 | 3.2 FastAPI 解析预览 | `POST /api/parse` 编排已有拆分、识别、匹配与组装服务，只读媒体和名录。 | HTTP 客户端覆盖完整预览、失败降级和零持久化副作用；不接确认写入/React。 |
 | 3.3 FastAPI 确认写入 | `POST /api/observations` 映射明确确认请求并复用批量事务/部分成功服务。 | HTTP 客户端覆盖 201、400/404/409/422、纯照片写入和零未确认副作用。 |
-| 3.4–3.x Web 后续 | 依次接 observations 查询/编辑/删除和 species API，再按第 8 节实现 React 输入页、管理页和响应式布局。 | API 逐切片验收；UI 覆盖两页完整流程及 1024/736/360px。 |
+| 3.4 FastAPI 观测读取 | `GET /api/observations` 列表/筛选和 `GET /api/observations/{id}` 详情，返回照片与 session 上下文。 | HTTP 客户端覆盖筛选、顺序、详情/404、字段边界和零副作用。 |
+| 3.5–3.x Web 后续 | 依次接 observations 编辑/删除和 species API，再按第 8 节实现 React 输入页、管理页和响应式布局。 | API 逐切片验收；UI 覆盖两页完整流程及 1024/736/360px。 |
 | 4. 收尾 | README / STATUS / DECISIONS 更新，最终回归，打 `v2.0` tag。 | 文档、测试、发布状态一致。 |
 
 ---

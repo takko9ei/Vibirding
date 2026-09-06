@@ -67,6 +67,47 @@ class ObservationRepository:
         rows = self._session.scalars(statement.order_by(ObservationRow.sequence_no)).all()
         return [_to_observation(row) for row in rows]
 
+    def list_recent(
+        self,
+        *,
+        limit: int,
+        place: str | None = None,
+        species: str | None = None,
+        date_from: str | None = None,
+        date_to: str | None = None,
+    ) -> list[ObservationRow]:
+        """Return the bounded management list without changing legacy order."""
+        statement: Select[tuple[ObservationRow]] = select(ObservationRow)
+        if place is not None:
+            statement = statement.where(
+                ObservationRow.place.is_not(None),
+                ObservationRow.place.contains(place, autoescape=True),
+            )
+        if species is not None:
+            statement = statement.where(
+                ObservationRow.species.is_not(None),
+                ObservationRow.species.contains(species, autoescape=True),
+            )
+        if date_from is not None:
+            statement = statement.where(
+                ObservationRow.obs_date.is_not(None),
+                ObservationRow.obs_date >= date_from,
+            )
+        if date_to is not None:
+            statement = statement.where(
+                ObservationRow.obs_date.is_not(None),
+                ObservationRow.obs_date <= date_to,
+            )
+        return list(
+            self._session.scalars(
+                statement.order_by(ObservationRow.sequence_no.desc()).limit(limit)
+            ).all()
+        )
+
+    def get_by_id(self, observation_id: uuid.UUID) -> ObservationRow | None:
+        """Read one observation by its public UUID."""
+        return self._session.get(ObservationRow, observation_id)
+
     def append_draft(
         self,
         draft: DraftObservation,
@@ -184,6 +225,10 @@ class SessionRepository:
         row.status = status
         self._session.flush()
 
+    def get_by_id(self, session_id: uuid.UUID) -> SessionRow | None:
+        """Read one confirmed-session audit row by ID."""
+        return self._session.get(SessionRow, session_id)
+
 
 class PhotoRepository:
     """Persist uploaded-file metadata and manage confirmed ownership links."""
@@ -256,6 +301,20 @@ class PhotoRepository:
             select(PhotoRow).where(PhotoRow.id.in_(photo_ids))
         ).all()
         return {row.id: row for row in rows}
+
+    def list_for_observations(
+        self, observation_ids: list[uuid.UUID]
+    ) -> list[PhotoRow]:
+        """Read linked photos in deterministic content-hash order."""
+        if not observation_ids:
+            return []
+        return list(
+            self._session.scalars(
+                select(PhotoRow)
+                .where(PhotoRow.observation_id.in_(observation_ids))
+                .order_by(PhotoRow.content_hash)
+            ).all()
+        )
 
     def lock_many(self, photo_ids: list[uuid.UUID]) -> dict[uuid.UUID, PhotoRow]:
         if not photo_ids:

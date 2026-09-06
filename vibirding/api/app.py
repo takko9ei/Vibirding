@@ -1,12 +1,21 @@
-"""FastAPI factory for v2 media, parse preview, and confirmed writes."""
+"""FastAPI factory for v2 media, parse, confirmed writes, and reads."""
 
 from __future__ import annotations
 
+from datetime import date
 from pathlib import Path
 from typing import Annotated, Protocol
 from uuid import UUID
 
-from fastapi import FastAPI, File, HTTPException, Response, UploadFile, status
+from fastapi import (
+    FastAPI,
+    File,
+    HTTPException,
+    Query,
+    Response,
+    UploadFile,
+    status,
+)
 from fastapi.staticfiles import StaticFiles
 
 from .. import config
@@ -17,6 +26,8 @@ from ..schemas import (
     ConfirmedBatch,
     MediaUploadResponse,
     ObservationCreateRequest,
+    ObservationDetail,
+    ObservationListResponse,
     ParseRequest,
     ParseResult,
 )
@@ -33,6 +44,11 @@ from ..services.media import (
     MediaTooLargeError,
     MediaValidationError,
     UnsupportedMediaTypeError,
+)
+from ..services.observations import (
+    ObservationNotFoundError,
+    ObservationQueryError,
+    ObservationReadService,
 )
 from ..services.parse import (
     PhotoPreprocessError,
@@ -75,6 +91,7 @@ def create_app(
     active_batch_service = batch_service or BatchWriteService(
         resolved_session_factory
     )
+    observation_reader = ObservationReadService(resolved_session_factory)
     app = FastAPI(title="Vibirding API", version="2.0.0")
 
     def get_parse_service() -> _ParsesPreview:
@@ -202,6 +219,47 @@ def create_app(
         except BatchConfirmationError as exc:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
+                detail=str(exc),
+            ) from exc
+
+    @app.get(
+        "/api/observations",
+        response_model=ObservationListResponse,
+    )
+    def list_observations(
+        limit: Annotated[int, Query(ge=1, le=100)] = 20,
+        place: str | None = None,
+        species: str | None = None,
+        date_from: date | None = None,
+        date_to: date | None = None,
+    ) -> ObservationListResponse:
+        try:
+            return observation_reader.list_observations(
+                limit=limit,
+                place=place,
+                species=species,
+                date_from=date_from,
+                date_to=date_to,
+            )
+        except ObservationQueryError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=str(exc),
+            ) from exc
+
+    @app.get(
+        "/api/observations/{observation_id}",
+        response_model=ObservationDetail,
+        responses={
+            status.HTTP_404_NOT_FOUND: {"description": "Observation not found"}
+        },
+    )
+    def get_observation(observation_id: UUID) -> ObservationDetail:
+        try:
+            return observation_reader.get_observation(observation_id)
+        except ObservationNotFoundError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
                 detail=str(exc),
             ) from exc
 

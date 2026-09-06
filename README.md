@@ -127,6 +127,17 @@ curl.exe -F "photo=@D:\path\bird.jpg;type=image/jpeg" http://127.0.0.1:8000/api/
 只有 JSON 布尔值 `true` 会触发写入。接受确认后返回 201；`created` 列出成功记录，`failed`
 列出逐条失败原因，因此部分失败不会丢掉已经成功的记录。
 
+写入后可以直接读取最近记录，不经过大模型：
+
+```text
+GET /api/observations?limit=10
+GET /api/observations?place=井之头&species=灰喜鹊&date_from=2026-09-01&date_to=2026-09-30
+GET /api/observations/<observation_id>
+```
+
+列表按最新记录优先，返回照片数量和缩略图 URL；详情另外返回全部照片以及该记录所属 session
+的整篇原始笔记。查询只读取 PostgreSQL，不消耗 DeepSeek、懂鸟或 eBird API 配额。
+
 **API key（在 `.env` 里配）**：
 
 | 变量               | 是否必需              | 用途                                     | 申请                             |
@@ -242,7 +253,8 @@ docker-compose.yml  # 本地 PostgreSQL 服务
 - **2.5 已完成并提交**：未匹配照片自动生成预览草稿。
 - **3.1 已完成并提交**：FastAPI 媒体上传、内容哈希去重、文件读取 URL。
 - **3.2 已完成并提交**：FastAPI 同步解析预览，串联文本、照片、名录匹配和草稿组装。
-- **3.3 已实现、待 review**：FastAPI 明确确认后的批量写入、事务与部分成功响应。
-- **3.4–3.x**：依次接入观测管理和 species API，再实现 React 输入预览页、记录管理页和响应式布局。
+- **3.3 已完成并提交**：FastAPI 明确确认后的批量写入、事务与部分成功响应。
+- **3.4 已实现、待 review**：FastAPI 最新记录列表、筛选、照片与 session 详情读取。
+- **3.5–3.x**：依次接入观测编辑/删除和 species API，再实现 React 输入预览页、记录管理页和响应式布局。
 
 完整范围与切片顺序见 [docs/architecture.md](docs/architecture.md) §10。
