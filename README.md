@@ -198,7 +198,8 @@ docker-compose.yml  # 本地 PostgreSQL 服务
 
 - **2.1–2.3 已完成并提交**：文本拆分、照片预处理、物种名录与 dry-run 匹配。
 - **2.4 已完成并提交**：批量确认写入、部分成功和会话/照片关联。
-- **2.5 已实现待 review**：未匹配照片自动生成预览草稿。
-- **3 Web**：FastAPI API、React 输入预览页和记录管理页。
+- **2.5 已完成并提交**：未匹配照片自动生成预览草稿。
+- **3 Web**：Neo Brutalism 双页与响应式方向已确认；等待架构 review 后再开始 FastAPI API、
+  React 输入预览页和记录管理页。
 
 完整范围与切片顺序见 [docs/architecture.md](docs/architecture.md) §10。
