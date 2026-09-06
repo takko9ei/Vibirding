@@ -33,6 +33,14 @@ class BatchMediaError(ValueError):
     """The confirmed batch refers to invalid or already-owned media."""
 
 
+class BatchMediaNotFoundError(BatchMediaError):
+    """One or more confirmed media IDs do not exist."""
+
+
+class BatchMediaConflictError(BatchMediaError):
+    """One or more media objects already belong to another session."""
+
+
 class _BatchItemError(ValueError):
     """One draft cannot be persisted, but sibling drafts may continue."""
 
@@ -134,14 +142,16 @@ class BatchWriteService:
     ) -> None:
         missing = [photo_id for photo_id in requested_ids if photo_id not in photos_by_id]
         if missing:
-            raise BatchMediaError(f"unknown media_ids: {', '.join(map(str, missing))}")
+            raise BatchMediaNotFoundError(
+                f"unknown media_ids: {', '.join(map(str, missing))}"
+            )
         owned = [
             photo_id
             for photo_id in requested_ids
             if photos_by_id[photo_id].session_id is not None
         ]
         if owned:
-            raise BatchMediaError(
+            raise BatchMediaConflictError(
                 f"media_ids already belong to a session: {', '.join(map(str, owned))}"
             )
 

@@ -344,6 +344,23 @@ class ParseRequest(BaseModel):
         return self
 
 
+class ObservationCreateRequest(BaseModel):
+    """Public HTTP confirmation request without an untrusted user identity."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    text: str
+    media_ids: list[UUID]
+    observations: list[DraftObservation] = Field(min_length=1)
+    confirmed: StrictBool
+
+    @model_validator(mode="after")
+    def require_original_input(self) -> "ObservationCreateRequest":
+        if not self.text.strip() and not self.media_ids:
+            raise ValueError("text and media_ids cannot both be empty")
+        return self
+
+
 class ConfirmedBatch(BaseModel):
     """One explicit user confirmation request for a complete draft batch."""
 
@@ -355,12 +372,11 @@ class ConfirmedBatch(BaseModel):
     confirmed: StrictBool
     user_id: UUID | None = None
 
-    @field_validator("raw_text")
-    @classmethod
-    def raw_text_must_not_be_blank(cls, value: str) -> str:
-        if not value.strip():
-            raise ValueError("raw_text must not be blank")
-        return value
+    @model_validator(mode="after")
+    def require_original_input(self) -> "ConfirmedBatch":
+        if not self.raw_text.strip() and not self.media_ids:
+            raise ValueError("raw_text and media_ids cannot both be empty")
+        return self
 
 
 class CreatedObservation(BaseModel):

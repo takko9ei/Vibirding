@@ -1,4 +1,4 @@
-"""FastAPI application factory for v2 media and parse-preview endpoints."""
+"""FastAPI factory for v2 media, parse preview, and confirmed writes."""
 
 from __future__ import annotations
 
@@ -12,8 +12,21 @@ from fastapi.staticfiles import StaticFiles
 from .. import config
 from ..db.session import SessionFactory, build_session_factory
 from ..llm.deepseek_client import DeepSeekClient, DeepSeekError
-from ..schemas import MediaUploadResponse, ParseRequest, ParseResult
+from ..schemas import (
+    BatchWriteResult,
+    ConfirmedBatch,
+    MediaUploadResponse,
+    ObservationCreateRequest,
+    ParseRequest,
+    ParseResult,
+)
 from ..services.assembly import ParseAssemblyError, ParseAssemblyService
+from ..services.batch import (
+    BatchConfirmationError,
+    BatchMediaConflictError,
+    BatchMediaNotFoundError,
+    BatchWriteService,
+)
 from ..services.matching import DryRunMatchingService
 from ..services.media import (
     MediaStorageService,
@@ -40,10 +53,15 @@ class _ParsesPreview(Protocol):
     def parse(self, text: str, media_ids: list[UUID]) -> ParseResult: ...
 
 
+class _ConfirmsBatch(Protocol):
+    def confirm(self, batch: ConfirmedBatch) -> BatchWriteResult: ...
+
+
 def create_app(
     session_factory: SessionFactory | None = None,
     media_dir: Path | None = None,
     parse_service: _ParsesPreview | None = None,
+    batch_service: _ConfirmsBatch | None = None,
 ) -> FastAPI:
     """Build an injectable application without opening a database connection."""
     resolved_session_factory = session_factory or build_session_factory()
@@ -54,6 +72,9 @@ def create_app(
         resolved_media_dir,
     )
     active_parse_service = parse_service
+    active_batch_service = batch_service or BatchWriteService(
+        resolved_session_factory
+    )
     app = FastAPI(title="Vibirding API", version="2.0.0")
 
     def get_parse_service() -> _ParsesPreview:
@@ -138,6 +159,47 @@ def create_app(
             PhotoPreprocessError,
             ParseAssemblyError,
         ) as exc:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=str(exc),
+            ) from exc
+
+    @app.post(
+        "/api/observations",
+        response_model=BatchWriteResult,
+        status_code=status.HTTP_201_CREATED,
+        responses={
+            status.HTTP_400_BAD_REQUEST: {
+                "description": "Batch was not explicitly or unambiguously confirmed"
+            },
+            status.HTTP_404_NOT_FOUND: {"description": "Media not found"},
+            status.HTTP_409_CONFLICT: {
+                "description": "Media already belongs to another session"
+            },
+        },
+    )
+    def create_observations(
+        request: ObservationCreateRequest,
+    ) -> BatchWriteResult:
+        batch = ConfirmedBatch(
+            raw_text=request.text,
+            media_ids=request.media_ids,
+            observations=request.observations,
+            confirmed=request.confirmed,
+        )
+        try:
+            return active_batch_service.confirm(batch)
+        except BatchMediaNotFoundError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=str(exc),
+            ) from exc
+        except BatchMediaConflictError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=str(exc),
+            ) from exc
+        except BatchConfirmationError as exc:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=str(exc),

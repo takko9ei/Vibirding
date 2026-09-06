@@ -111,8 +111,21 @@ curl.exe -F "photo=@D:\path\bird.jpg;type=image/jpeg" http://127.0.0.1:8000/api/
 ```
 
 它会同步完成文本拆分、照片鉴种、物种名录匹配并返回确认前预览。这个接口不会写入观测；
-当前还需要等后续确认写入 API，才能从 Web 流程正式保存记录。真实图文解析需要在 `.env`
-配置 `DEEPSEEK_API_KEY`，带照片时还需要 `HHO_API_KEY`。
+真实图文解析需要在 `.env` 配置 `DEEPSEEK_API_KEY`，带照片时还需要 `HHO_API_KEY`。
+
+检查并按需编辑返回的 `draft_observations` 后，调用 `POST /api/observations`：
+
+```json
+{
+  "text": "原始整篇笔记",
+  "media_ids": ["本批次的全部 media_id"],
+  "observations": ["/api/parse 返回并经用户确认的草稿对象"],
+  "confirmed": true
+}
+```
+
+只有 JSON 布尔值 `true` 会触发写入。接受确认后返回 201；`created` 列出成功记录，`failed`
+列出逐条失败原因，因此部分失败不会丢掉已经成功的记录。
 
 **API key（在 `.env` 里配）**：
 
@@ -228,7 +241,8 @@ docker-compose.yml  # 本地 PostgreSQL 服务
 - **2.4 已完成并提交**：批量确认写入、部分成功和会话/照片关联。
 - **2.5 已完成并提交**：未匹配照片自动生成预览草稿。
 - **3.1 已完成并提交**：FastAPI 媒体上传、内容哈希去重、文件读取 URL。
-- **3.2 已实现、待 review**：FastAPI 同步解析预览，串联文本、照片、名录匹配和草稿组装。
-- **3.3–3.x**：依次接入确认写入及管理 API，再实现 React 输入预览页、记录管理页和响应式布局。
+- **3.2 已完成并提交**：FastAPI 同步解析预览，串联文本、照片、名录匹配和草稿组装。
+- **3.3 已实现、待 review**：FastAPI 明确确认后的批量写入、事务与部分成功响应。
+- **3.4–3.x**：依次接入观测管理和 species API，再实现 React 输入预览页、记录管理页和响应式布局。
 
 完整范围与切片顺序见 [docs/architecture.md](docs/architecture.md) §10。

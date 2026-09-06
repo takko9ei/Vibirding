@@ -14,10 +14,10 @@
 **v2 的 PostgreSQL 存储底座已经完成。** PostgreSQL、SQLAlchemy、Alembic 和 psycopg 3
 已经替换 JSONL 持久化，并保留 v1 单条 CLI、工具契约与离线 eval 基线。
 
-**2.1–2.5 和 3.1 已完成、验证并提交，Web 视觉与响应式方向也已确认。3.2 FastAPI
-解析预览已经实现并通过回归，当前等待 review。** 本切片建立 `POST /api/parse`，把已完成的
-文本拆分、照片预处理、名录匹配和预览组装串成一个同步、无持久化副作用的 HTTP 能力；
-review 前不得开始确认写入、观测 CRUD、species API、CORS 或 React。
+**2.1–2.5、3.1 和 3.2 已完成、验证并提交，Web 视觉与响应式方向也已确认。3.3 FastAPI
+批量确认写入已经实现并通过回归，当前等待 review。** 本切片建立 `POST /api/observations`，
+把明确确认的预览草稿交给既有 `BatchWriteService` 事务化保存；review 前不得开始观测列表/
+详情/编辑/删除、species API、CORS 或 React。
 
 **不迁移旧数据。** v1 真实 `data/` 为空；这次是 schema migration，不是数据 migration。
 
@@ -132,7 +132,7 @@ Vibirding/
 │   │   ├── media.py                      # 第 3.1 步：哈希、校验、文件保存和去重
 │   │   └── preview.py                    # 第 3.2 步：读取媒体并编排解析预览流水线
 │   └── api/
-│       └── app.py                        # 第 3.1/3.2 步：FastAPI 工厂、媒体和解析路由
+│       └── app.py                        # 第 3.1–3.3 步：FastAPI 工厂和当前 HTTP 路由
 ├── frontend/                             # 后续：React 应用
 ├── evals/                                # 保留 v1 eval，后续新增 v2 用例
 └── scripts/                              # 开发期自检与冒烟脚本
@@ -286,6 +286,12 @@ MediaUploadResponse
 ParseRequest
   text: str
   media_ids: list[UUID]
+
+ObservationCreateRequest
+  text: str
+  media_ids: list[UUID]
+  observations: list[DraftObservation]
+  confirmed: StrictBool
 ```
 
 ### 4.3 PostgreSQL 表设计
@@ -506,7 +512,7 @@ POST   /api/parse
        {text, media_ids[]} -> {draft_observations[], unmatched_photos[], warnings[], job_status}
 
 POST   /api/observations
-       {text, media_ids[], observations[]} -> {session_id, created[], failed[]}
+       {text, media_ids[], observations[], confirmed} -> {session_id, created[], failed[]}
 
 GET    /api/observations?limit=&place=&species=&date_from=
 GET    /api/observations/{id}
@@ -581,6 +587,39 @@ POST /api/parse
 - 3.2 只读取 `photos` / `species`：不缓存识别候选，不修改媒体元数据，不创建 session 或
   observation。重复 parse 可以重新计算但不能产生数据库副作用；确认写入仍只属于后续
   `POST /api/observations`。
+
+### 6.11 第 3.3 步 FastAPI 批量确认写入契约
+
+```python
+POST /api/observations
+{
+    "text": str,
+    "media_ids": list[UUID],
+    "observations": list[DraftObservation],
+    "confirmed": StrictBool,
+}
+-> 201 BatchWriteResult
+```
+
+- HTTP 使用独立 `ObservationCreateRequest`，禁止额外字段且不暴露预留的 `user_id`；路由只负责
+  将 `text` 映射为内部 `ConfirmedBatch.raw_text` 并调用 `BatchWriteService.confirm()`，不得在
+  API 层复制事务或照片归属规则。
+- `confirmed` 必须是 JSON 布尔值 `true`；`false` 返回 400，字符串 `"true"` / `"yes"` 等
+  宽松真值返回 422。未明确确认时不得创建 session、observation 或媒体关联。
+- `observations` 至少一条；支持纯文本和纯照片确认，所以 `text` 可以为空，但此时
+  `media_ids` 必须非空。`text` 与 `media_ids` 同时为空、结构/类型错误或空 observations 返回
+  422。内部 `ConfirmedBatch.raw_text` 同步放宽为空字符串以保存真实的纯照片原始输入。
+- 请求级重复 media/draft ID 返回 400；未知 media ID 返回 404；媒体已属于其他 session 返回
+  409。以上批次级失败必须整体回滚，不创建新的 session。
+- 一旦批次确认被接收，即创建审计 session 并返回 201。每条草稿继续使用 2.4 的 savepoint
+  语义：有效项进入 `created[]`，物种/照片引用等单条错误进入 `failed[]`；部分成功乃至全部
+  草稿失败仍是 201，因为对应的 confirmed session 已经创建并记录 partial/failed 状态。
+- `created[]` 和 `failed[]` 始终同时出现并保持各自的输入顺序。成功 observation 保存编辑后的
+  草稿字段，照片关联到同一 session 和对应 observation；本切片不删除媒体文件。
+- `create_app(session_factory=None, media_dir=None, parse_service=None, batch_service=None)` 允许
+  HTTP 测试注入固定时间/ID 的写入服务；正式应用直接用同一个 session factory 构造默认
+  `BatchWriteService`。该 POST 有副作用，不承诺无 idempotency key 的自动重试安全，前端后续
+  必须在提交期间禁用重复点击。
 
 ---
 
@@ -717,6 +756,8 @@ React 实现应以共享设计 token 和可复用业务组件表达上述设计�
   拒绝、文件与数据库去重，以及所有失败路径不残留临时文件。
 - 3.2 单独覆盖解析 HTTP：纯文本、纯照片、图文匹配、未匹配照片建草稿、单图失败 warning、
   请求顺序、未知/重复媒体、上游模型失败，并确认 photos/sessions/observations 均无写入变化。
+- 3.3 单独覆盖确认写入 HTTP：未确认零写入、完整成功、部分/全部失败、纯文本/纯照片、
+  未知/已认领/重复媒体、严格布尔确认和 created/failed 稳定响应。
 
 ---
 
@@ -733,7 +774,8 @@ React 实现应以共享设计 token 和可复用业务组件表达上述设计�
 | 2.5 未匹配照片 | 未匹配照片自动生成记录，并纳入同一批预览确认。 | 覆盖自动建记录与用户统一确认的边界用例。 |
 | 3.1 FastAPI 媒体上传 | FastAPI 工厂、`POST /api/media`、哈希文件存储、photos 元数据与只读媒体 URL。 | HTTP 客户端覆盖 201/200、去重、校验、失败清理；不接 parse/React。 |
 | 3.2 FastAPI 解析预览 | `POST /api/parse` 编排已有拆分、识别、匹配与组装服务，只读媒体和名录。 | HTTP 客户端覆盖完整预览、失败降级和零持久化副作用；不接确认写入/React。 |
-| 3.3–3.x Web 后续 | 依次接 observations/species API，再按第 8 节实现 React 输入页、管理页和响应式布局。 | API 逐切片验收；UI 覆盖两页完整流程及 1024/736/360px。 |
+| 3.3 FastAPI 确认写入 | `POST /api/observations` 映射明确确认请求并复用批量事务/部分成功服务。 | HTTP 客户端覆盖 201、400/404/409/422、纯照片写入和零未确认副作用。 |
+| 3.4–3.x Web 后续 | 依次接 observations 查询/编辑/删除和 species API，再按第 8 节实现 React 输入页、管理页和响应式布局。 | API 逐切片验收；UI 覆盖两页完整流程及 1024/736/360px。 |
 | 4. 收尾 | README / STATUS / DECISIONS 更新，最终回归，打 `v2.0` tag。 | 文档、测试、发布状态一致。 |
 
 ---
