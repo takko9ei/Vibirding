@@ -28,11 +28,17 @@ from vibirding.db.session import build_engine  # noqa: E402
 EXPECTED_COLUMNS = {
     "id", "sequence_no", "timestamp", "place", "obs_date", "time_of_day",
     "species", "count", "behavior", "raw_note", "confidence", "source",
-    "flags", "user_id", "species_id",
+    "flags", "user_id", "species_id", "session_id",
 }
 EXPECTED_SPECIES_COLUMNS = {
     "id", "canonical_chinese_name", "scientific_name", "taxonomy_source",
     "taxonomy_key", "aliases",
+}
+EXPECTED_SESSION_COLUMNS = {"id", "created_at", "raw_text", "status", "user_id"}
+EXPECTED_PHOTO_COLUMNS = {
+    "id", "content_hash", "storage_path", "original_filename", "mime_type",
+    "size_bytes", "species_label", "scientific_name", "confidence",
+    "provider_candidate_id", "species_id", "session_id", "observation_id",
 }
 
 
@@ -73,14 +79,23 @@ def main() -> int:
         species_columns = {
             column["name"]: column for column in inspector.get_columns("species")
         }
+        session_columns = {
+            column["name"]: column for column in inspector.get_columns("sessions")
+        }
+        photo_columns = {
+            column["name"]: column for column in inspector.get_columns("photos")
+        }
         orm_columns = set(Base.metadata.tables["observations"].columns.keys())
         orm_species_columns = set(Base.metadata.tables["species"].columns.keys())
+        orm_session_columns = set(Base.metadata.tables["sessions"].columns.keys())
+        orm_photo_columns = set(Base.metadata.tables["photos"].columns.keys())
         with test_engine.connect() as connection:
             revision = connection.execute(text("SELECT version_num FROM alembic_version")).scalar_one()
 
-        check("migration 到达 0002 head", revision == "0002", str(revision))
+        check("migration 到达 0003 head", revision == "0003", str(revision))
         check("创建 observations 表", "observations" in tables, str(tables))
         check("创建 species 表", "species" in tables, str(tables))
+        check("创建 sessions/photos 表", {"sessions", "photos"}.issubset(tables), str(tables))
         check("migration 列集合正确", set(columns) == EXPECTED_COLUMNS, str(set(columns)))
         check("migration 与 ORM 列一致", set(columns) == orm_columns, str(orm_columns))
         check(
@@ -93,6 +108,10 @@ def main() -> int:
             set(species_columns) == orm_species_columns,
             str(orm_species_columns),
         )
+        check("sessions migration 列集合正确", set(session_columns) == EXPECTED_SESSION_COLUMNS, str(set(session_columns)))
+        check("sessions migration 与 ORM 列一致", set(session_columns) == orm_session_columns, str(orm_session_columns))
+        check("photos migration 列集合正确", set(photo_columns) == EXPECTED_PHOTO_COLUMNS, str(set(photo_columns)))
+        check("photos migration 与 ORM 列一致", set(photo_columns) == orm_photo_columns, str(orm_photo_columns))
         check("id 使用 UUID", columns["id"]["type"].__class__.__name__ == "UUID")
         check("flags 使用 JSONB", columns["flags"]["type"].__class__.__name__ == "JSONB")
         check("flags 默认空 JSONB", "[]" in str(columns["flags"].get("default")))
@@ -113,11 +132,23 @@ def main() -> int:
             and species_fk.get("options", {}).get("ondelete") == "SET NULL",
             str(species_fk),
         )
+        observation_fks = {tuple(fk["constrained_columns"]): fk for fk in foreign_keys}
+        check(
+            "observations.session_id 外键 ON DELETE SET NULL",
+            ("session_id",) in observation_fks
+            and observation_fks[("session_id",)]["referred_table"] == "sessions"
+            and observation_fks[("session_id",)].get("options", {}).get("ondelete") == "SET NULL",
+            str(observation_fks.get(("session_id",))),
+        )
+        photo_fks = {tuple(fk["constrained_columns"]): fk for fk in inspector.get_foreign_keys("photos")}
+        check("photos 三个外键存在", set(photo_fks) == {("species_id",), ("session_id",), ("observation_id",)}, str(photo_fks))
+        photo_uniques = inspector.get_unique_constraints("photos")
+        check("photos.content_hash 唯一", any(item["column_names"] == ["content_hash"] for item in photo_uniques), str(photo_uniques))
 
         command.downgrade(alembic_config, "base")
         inspector = inspect(test_engine)
         remaining = set(inspector.get_table_names())
-        check("downgrade 删除 observations/species", not {"observations", "species"} & remaining, str(remaining))
+        check("downgrade 删除全部业务表", not {"observations", "species", "sessions", "photos"} & remaining, str(remaining))
         test_engine.dispose()
     finally:
         if old_url is None:

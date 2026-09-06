@@ -12,8 +12,8 @@
 - v2 第 1 步 PostgreSQL 存储替换已实现、验证并提交。
 - v2 **2.1 文本拆分已实现、验证并提交**。
 - v2 **2.2 照片预处理已实现、验证并提交**。
-- v2 **2.3 物种名录与 dry-run 匹配已实现并通过验证，正在等待 review/commit**；
-  2.4 尚未开始。
+- v2 **2.3 物种名录与 dry-run 匹配已实现、验证并提交**。
+- v2 **2.4 批量确认写入已实现并通过验证，正在等待 review/commit**；2.5 尚未开始。
 
 ## v2 第 1 步已交付
 
@@ -31,15 +31,17 @@ JSONB `flags` 和可空 `user_id`。本切片未引入批量、照片、物种�
 
 | 验证 | 结果 |
 | --- | --- |
-| Alembic upgrade/downgrade 与 ORM 一致性 | 16/16 |
+| Alembic upgrade/downgrade 与 ORM 一致性 | 24/24 |
 | 2.1 文本拆分独立离线测试 | 29/29 |
 | 2.2 照片预处理独立离线测试 | 26/26 |
 | 2.3 名录与 dry-run 匹配测试 | 36/36 |
+| 2.4 批量确认写入测试 | 35/35 |
 | PostgreSQL 存储与 v1 Log 兼容语义 | 38/38 |
 | S1/S3/S4/S6 离线自检 | 101/101 |
 | v1 离线 eval | 13/13 |
 | 开发库 species | 11,167 条（eBird 当前名录） |
 | 开发库 observations | 0 条 |
+| 开发库 sessions / photos | 0 / 0 条 |
 | 测试遗留临时 schema | 0 个 |
 
 ## v2 2.1 本次交付
@@ -68,6 +70,18 @@ JSONB `flags` 和可空 `user_id`。本切片未引入批量、照片、物种�
   不擅自选择。
 - 本切片只允许更新 species 名录，不修改草稿、不写 observations、不自动创建未匹配记录。
 
+## v2 2.4 本次交付
+
+- 新增 `0003` migration：创建 `sessions` / `photos`，并给 `observations` 增加可空
+  `session_id` 外键；开发库已升级到 `0003`。
+- 新增严格确认请求和部分成功响应模型；未明确确认、重复草稿 ID 或重复媒体 ID 均在事务前
+  拒绝。
+- 批量服务先锁定并认领照片，再创建 session；未知或已被其他 session 认领的媒体会令整批
+  回滚。
+- 每条 observation 在独立 savepoint 内写入；单条数据失败不影响同批成功项，最终返回
+  `created[]` / `failed[]` 并记录 completed / partial / failed 状态。
+- 本切片只关联已存在的照片元数据，不读写媒体文件，也不实现 2.5 的未匹配照片自动建记录。
+
 保留的查询语义包括：大小写敏感子串、`%`/`_` 按普通字符处理、`start..end`
 日期范围、空日期排除、插入顺序和空库返回 `[]`。
 
@@ -87,7 +101,7 @@ PostgreSQL volume 持久保存数据；`docker compose down -v` 会删除该 vol
 - `scripts/check_s1.py`、`check_s3.py`、`check_s4.py`、`check_s5.py`、`check_s6.py`：分切片回归。
 - `scripts/check_v2_db.py`：真实 migration 验证。
 - `scripts/check_v2_text_split.py`、`check_v2_photo_preprocess.py`、
-  `check_v2_taxonomy_matching.py`：v2 批量切片离线验证。
+  `check_v2_taxonomy_matching.py`、`check_v2_batch_write.py`：v2 批量切片验证。
 - `scripts/import_ebird_taxonomy.py`：从 eBird API 幂等导入当前物种名录。
 - `scripts/db_test_support.py`：测试 schema 隔离。
 - `scripts/run_s2.py`：Gemini 备用 provider 手动冒烟。
@@ -98,4 +112,4 @@ PostgreSQL volume 持久保存数据；`docker compose down -v` 会删除该 vol
 
 ## 当前 review 边界
 
-当前只 review 2.3 物种名录与 dry-run 匹配；通过后提交，再开始 2.4 批量确认写入。
+当前只 review 2.4 批量确认写入；通过后提交，再开始 2.5 未匹配照片处理。

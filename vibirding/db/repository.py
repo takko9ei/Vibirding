@@ -9,8 +9,14 @@ from sqlalchemy import Select, select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
 
-from ..schemas import Observation, SpeciesCatalogEntry, SpeciesRecord
-from .models import ObservationRow, SpeciesRow
+from ..schemas import (
+    DraftObservation,
+    Observation,
+    PhotoMetadataInput,
+    SpeciesCatalogEntry,
+    SpeciesRecord,
+)
+from .models import ObservationRow, PhotoRow, SessionRow, SpeciesRow
 
 
 class ObservationRepository:
@@ -60,6 +66,37 @@ class ObservationRepository:
         statement = _apply_date_range(statement, date_range)
         rows = self._session.scalars(statement.order_by(ObservationRow.sequence_no)).all()
         return [_to_observation(row) for row in rows]
+
+    def append_draft(
+        self,
+        draft: DraftObservation,
+        *,
+        observation_id: uuid.UUID,
+        timestamp: datetime,
+        session_id: uuid.UUID,
+        user_id: uuid.UUID | None,
+    ) -> None:
+        """Stage one confirmed v2 draft in the caller's transaction/savepoint."""
+        self._session.add(
+            ObservationRow(
+                id=observation_id,
+                timestamp=timestamp,
+                place=draft.place,
+                obs_date=draft.obs_date,
+                time_of_day=draft.time_of_day,
+                species=draft.species_label,
+                species_id=draft.species_id,
+                session_id=session_id,
+                count=draft.count,
+                behavior=draft.behavior,
+                raw_note=draft.raw_note,
+                confidence=draft.confidence,
+                source=draft.source,
+                flags=list(draft.flags),
+                user_id=user_id,
+            )
+        )
+        self._session.flush()
 
 
 class SpeciesRepository:
@@ -116,6 +153,87 @@ class SpeciesRepository:
             )
         ).all()
         return [_to_species(row) for row in rows]
+
+
+class SessionRepository:
+    """Create and finalize one confirmed batch audit row."""
+
+    def __init__(self, session: Session) -> None:
+        self._session = session
+
+    def create(
+        self,
+        *,
+        session_id: uuid.UUID,
+        created_at: datetime,
+        raw_text: str,
+        user_id: uuid.UUID | None,
+    ) -> SessionRow:
+        row = SessionRow(
+            id=session_id,
+            created_at=created_at,
+            raw_text=raw_text,
+            status="processing",
+            user_id=user_id,
+        )
+        self._session.add(row)
+        self._session.flush()
+        return row
+
+    def set_status(self, row: SessionRow, status: str) -> None:
+        row.status = status
+        self._session.flush()
+
+
+class PhotoRepository:
+    """Persist uploaded-file metadata and manage confirmed ownership links."""
+
+    def __init__(self, session: Session) -> None:
+        self._session = session
+
+    def add(self, metadata: PhotoMetadataInput) -> None:
+        candidate = metadata.candidate
+        self._session.add(
+            PhotoRow(
+                id=metadata.photo_id,
+                content_hash=metadata.content_hash,
+                storage_path=metadata.storage_path,
+                original_filename=metadata.original_filename,
+                mime_type=metadata.mime_type,
+                size_bytes=metadata.size_bytes,
+                species_label=(candidate.species_label if candidate else None),
+                scientific_name=(candidate.scientific_name if candidate else None),
+                confidence=(candidate.confidence if candidate else None),
+                provider_candidate_id=(
+                    candidate.provider_candidate_id if candidate else None
+                ),
+            )
+        )
+        self._session.flush()
+
+    def lock_many(self, photo_ids: list[uuid.UUID]) -> dict[uuid.UUID, PhotoRow]:
+        if not photo_ids:
+            return {}
+        rows = self._session.scalars(
+            select(PhotoRow)
+            .where(PhotoRow.id.in_(photo_ids))
+            .with_for_update()
+        ).all()
+        return {row.id: row for row in rows}
+
+    def assign_session(
+        self, rows: list[PhotoRow], session_id: uuid.UUID
+    ) -> None:
+        for row in rows:
+            row.session_id = session_id
+        self._session.flush()
+
+    def assign_observation(
+        self, rows: list[PhotoRow], observation_id: uuid.UUID
+    ) -> None:
+        for row in rows:
+            row.observation_id = observation_id
+        self._session.flush()
 
 
 def _apply_date_range(

@@ -13,7 +13,7 @@ from __future__ import annotations
 from typing import Literal
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, StrictBool, field_validator
 
 
 class ToolCall(BaseModel):
@@ -240,6 +240,87 @@ class DryRunMatchPlan(BaseModel):
     drafts: list[DraftSpeciesResolution]
     photos: list[PhotoMatchPlan]
     warnings: list[str] = Field(default_factory=list)
+
+
+class PhotoMetadataInput(BaseModel):
+    """Metadata for a file already saved by the future media upload service."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    photo_id: UUID
+    content_hash: str
+    storage_path: str
+    original_filename: str
+    mime_type: str
+    size_bytes: int = Field(ge=0)
+    candidate: BirdIdCandidate | None = None
+
+    @field_validator("content_hash")
+    @classmethod
+    def content_hash_must_be_sha256(cls, value: str) -> str:
+        value = value.strip().lower()
+        if len(value) != 64:
+            raise ValueError("content_hash must be a 64-character SHA-256 hex value")
+        try:
+            bytes.fromhex(value)
+        except ValueError as exc:
+            raise ValueError("content_hash must contain hexadecimal characters") from exc
+        return value
+
+    @field_validator("storage_path", "original_filename", "mime_type")
+    @classmethod
+    def metadata_text_must_not_be_blank(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError("photo metadata text must not be blank")
+        return value
+
+
+class ConfirmedBatch(BaseModel):
+    """One explicit user confirmation request for a complete draft batch."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    raw_text: str
+    media_ids: list[UUID] = Field(default_factory=list)
+    observations: list[DraftObservation] = Field(min_length=1)
+    confirmed: StrictBool
+    user_id: UUID | None = None
+
+    @field_validator("raw_text")
+    @classmethod
+    def raw_text_must_not_be_blank(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("raw_text must not be blank")
+        return value
+
+
+class CreatedObservation(BaseModel):
+    """One successfully persisted draft."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    client_draft_id: str
+    observation_id: UUID
+
+
+class FailedObservation(BaseModel):
+    """One rejected draft and its user-visible reason."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    client_draft_id: str
+    reason: str
+
+
+class BatchWriteResult(BaseModel):
+    """Partial-success result; both lists are always present."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    session_id: UUID
+    created: list[CreatedObservation] = Field(default_factory=list)
+    failed: list[FailedObservation] = Field(default_factory=list)
 
 
 class TraceEvent(BaseModel):

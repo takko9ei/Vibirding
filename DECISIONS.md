@@ -2,6 +2,16 @@
 
 > 每个取舍记三行：**决定 / 为什么 / 代价或取舍**。面试逐字稿用。
 
+## v2：批量确认写入使用外层事务 + 逐条 savepoint
+- **决定**：确认请求用一个外层事务创建 session/认领媒体，每条 observation 在 `begin_nested()` savepoint 中写入；可预期的单条失败进入 `failed[]`，其他条继续，最终 session 标 completed/partial/failed。
+- **为什么**：产品规则要求部分成功，同时 session 和照片归属又必须整体一致；savepoint 能回滚一条而不撤销同批已成功条目，外层事务仍能在系统异常时全部回滚。
+- **代价/取舍**：结果和事务控制比“一次 bulk insert”复杂，批内照片冲突按草稿顺序由前一成功项认领；失败 session 仍会保留用于审计。
+
+## v2：服务层要求显式 confirmed，并锁定照片后再认领
+- **决定**：`BatchWriteService.confirm()` 只有在 `confirmed is True` 时才打开事务；用 `FOR UPDATE` 锁定全部 media ID，未知或已被其他 session 使用时整批拒绝。
+- **为什么**：未来 UI 按钮不是安全边界，服务本身必须阻止未确认写入；行锁避免两个并发确认把同一张照片关联到不同记录。
+- **代价/取舍**：照片当前只能归属一个确认批次；重用同一媒体重新提交会被拒绝，如未来需要多对多复用应单独引入关联表。
+
 ## v2：物种名录采用 eBird Taxonomy + speciesCode
 - **决定**：从 eBird Taxonomy 当前版本导入 `category=species`，简体中文 locale 使用 `zh_SIM`；`taxonomy_source="ebird"`、`taxonomy_key=speciesCode`，科学名作为照片候选到名录的首选解析字段。
 - **为什么**：eBird/Clements 是全球统一且按年维护的鸟类名录，eBird 同时提供稳定代码、科学名和多语言常用名；项目已有 eBird key 与适配基础，不必再维护第二套外部系统。

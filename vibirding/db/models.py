@@ -49,6 +49,20 @@ class SpeciesRow(Base):
     )
 
 
+class SessionRow(Base):
+    """One explicitly confirmed multi-observation submission."""
+
+    __tablename__ = "sessions"
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+    raw_text: Mapped[str] = mapped_column(Text, nullable=False)
+    status: Mapped[str] = mapped_column(Text, nullable=False)
+    user_id: Mapped[uuid.UUID | None] = mapped_column(Uuid(as_uuid=True))
+
+
 class ObservationRow(Base):
     """Database representation of the v1-compatible Observation."""
 
@@ -70,6 +84,10 @@ class ObservationRow(Base):
         Uuid(as_uuid=True),
         ForeignKey("species.id", ondelete="SET NULL"),
     )
+    session_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid(as_uuid=True),
+        ForeignKey("sessions.id", ondelete="SET NULL"),
+    )
     count: Mapped[int | None] = mapped_column(Integer)
     behavior: Mapped[str | None] = mapped_column(Text)
     raw_note: Mapped[str] = mapped_column(Text, nullable=False)
@@ -82,3 +100,32 @@ class ObservationRow(Base):
         server_default=text("'[]'::jsonb"),
     )
     user_id: Mapped[uuid.UUID | None] = mapped_column(Uuid(as_uuid=True))
+
+
+class PhotoRow(Base):
+    """Metadata and ownership for a content-addressed media file."""
+
+    __tablename__ = "photos"
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True)
+    content_hash: Mapped[str] = mapped_column(Text, unique=True, nullable=False)
+    storage_path: Mapped[str] = mapped_column(Text, nullable=False)
+    original_filename: Mapped[str] = mapped_column(Text, nullable=False)
+    mime_type: Mapped[str] = mapped_column(Text, nullable=False)
+    size_bytes: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    species_label: Mapped[str | None] = mapped_column(Text)
+    scientific_name: Mapped[str | None] = mapped_column(Text)
+    confidence: Mapped[float | None] = mapped_column(Float)
+    provider_candidate_id: Mapped[str | None] = mapped_column(Text)
+    species_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid(as_uuid=True),
+        ForeignKey("species.id", ondelete="SET NULL"),
+    )
+    session_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid(as_uuid=True),
+        ForeignKey("sessions.id", ondelete="SET NULL"),
+    )
+    observation_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid(as_uuid=True),
+        ForeignKey("observations.id", ondelete="SET NULL"),
+    )
