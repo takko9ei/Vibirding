@@ -31,6 +31,7 @@ from ..schemas import (
     ObservationUpdateRequest,
     ParseRequest,
     ParseResult,
+    SpeciesSearchResponse,
 )
 from ..services.assembly import ParseAssemblyError, ParseAssemblyService
 from ..services.batch import (
@@ -65,7 +66,7 @@ from ..services.preview import (
     ParsePreviewError,
     ParsePreviewService,
 )
-from ..services.taxonomy import TaxonomyService
+from ..services.taxonomy import TaxonomyQueryError, TaxonomyService
 from ..tools.bird_id import BirdIdTool
 
 
@@ -98,6 +99,7 @@ def create_app(
     observation_reader = ObservationReadService(resolved_session_factory)
     observation_editor = ObservationEditService(resolved_session_factory)
     observation_deleter = ObservationDeleteService(resolved_session_factory)
+    taxonomy = TaxonomyService(resolved_session_factory)
     app = FastAPI(title="Vibirding API", version="2.0.0")
 
     def get_parse_service() -> _ParsesPreview:
@@ -310,6 +312,22 @@ def create_app(
                 detail=str(exc),
             ) from exc
         return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+    @app.get(
+        "/api/species",
+        response_model=SpeciesSearchResponse,
+    )
+    def search_species(
+        q: Annotated[str, Query(min_length=1, max_length=100)],
+        limit: Annotated[int, Query(ge=1, le=50)] = 20,
+    ) -> SpeciesSearchResponse:
+        try:
+            return taxonomy.search(q, limit)
+        except TaxonomyQueryError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=str(exc),
+            ) from exc
 
     app.mount(
         "/media",

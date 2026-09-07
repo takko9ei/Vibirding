@@ -14,9 +14,9 @@
 **v2 的 PostgreSQL 存储底座已经完成。** PostgreSQL、SQLAlchemy、Alembic 和 psycopg 3
 已经替换 JSONL 持久化，并保留 v1 单条 CLI、工具契约与离线 eval 基线。
 
-**2.1–2.5 和 3.1–3.5 已完成、验证并提交，Web 视觉与响应式方向也已确认。3.6 FastAPI
-观测删除已经实现并通过回归，当前等待 review。** 本切片删除一条观测，同时保留 session
-审计、照片元数据和媒体文件；review 前不得开始 species API、CORS 或 React。
+**2.1–2.5 和 3.1–3.6 已完成、验证并提交，Web 视觉与响应式方向也已确认。3.7 FastAPI
+物种查询已经实现并通过回归，当前等待 review。** 本切片为编辑表单提供本地名录联想，只读
+PostgreSQL，不调用 eBird 网络；review 前不得开始 CORS 或 React。
 
 **不迁移旧数据。** v1 真实 `data/` 为空；这次是 schema migration，不是数据 migration。
 
@@ -124,7 +124,7 @@ Vibirding/
 │   ├── tools/                            # 继承并后续扩展批量能力
 │   ├── services/
 │   │   ├── parse.py                      # 第 2.1/2.2 步：文本拆分和照片预处理
-│   │   ├── taxonomy.py                   # 第 2.3 步：名录导入与名称解析
+│   │   ├── taxonomy.py                   # 第 2.3/3.7 步：名录导入、解析和 Web 查询
 │   │   ├── matching.py                   # 第 2.3 步：只读图文匹配计划
 │   │   ├── assembly.py                   # 第 2.5 步：组装预览并生成未匹配照片草稿
 │   │   ├── batch.py                      # 第 2.4 步：确认后的事务化批量写入
@@ -132,7 +132,7 @@ Vibirding/
 │   │   ├── preview.py                    # 第 3.2 步：读取媒体并编排解析预览流水线
 │   │   └── observations.py               # 第 3.4–3.6 步：观测读取、编辑与删除服务
 │   └── api/
-│       └── app.py                        # 第 3.1–3.6 步：FastAPI 工厂和当前 HTTP 路由
+│       └── app.py                        # 第 3.1–3.7 步：FastAPI 工厂和当前 HTTP 路由
 ├── frontend/                             # 后续：React 应用
 ├── evals/                                # 保留 v1 eval，后续新增 v2 用例
 └── scripts/                              # 开发期自检与冒烟脚本
@@ -313,6 +313,12 @@ ObservationListResponse
 ObservationUpdateRequest
   place? / obs_date? / time_of_day? / species_label? / species_id?
   count? / behavior? / raw_note? / confidence? / flags?
+
+SpeciesSearchItem
+  species_id / canonical_chinese_name / scientific_name / aliases[]
+
+SpeciesSearchResponse
+  items: list[SpeciesSearchItem]
 ```
 
 ### 4.3 PostgreSQL 表设计
@@ -361,7 +367,7 @@ NULL。`photos` 行代表已经由上传阶段保存到文件系统的媒体元�
 | `db/session.py` | 只负责 engine、session factory、事务边界和测试注入。 |
 | `db/models.py` | SQLAlchemy ORM 表映射，不能包含 LLM 或 HTTP 行为。 |
 | `db/repository.py` | 查询和持久化语义；不格式化给模型看的文本。 |
-| `services/taxonomy.py` | 第 2.3 步：eBird 名录适配、导入、别名/外部结果到内部 `species_id` 的映射。 |
+| `services/taxonomy.py` | 第 2.3/3.7 步：eBird 名录适配/导入、名称映射，以及给 Web 使用的本地名录查询。 |
 | `services/media.py` | 第 3.1 步：流式限制上传大小、校验 JPEG、按 SHA-256 保存，并与 photos 元数据幂等去重。 |
 | `services/parse.py` | 第 2.1/2.2 步：文本拆分、照片预处理与草稿构造；解析阶段不写 observations。 |
 | `tools/bird_id.py` | 保留 v1 `run()` 文本工具契约，并提供结构化 `identify()` 给批处理服务复用。 |
@@ -723,6 +729,27 @@ DELETE /api/observations/{observation_id}
 - 成功使用标准 HTTP 204，响应体为空；删除后列表不再返回目标，详情、编辑和再次删除均返回
   404。该端点不调用 LLM/懂鸟/eBird 网络，也不删除或改写媒体文件。
 
+### 6.15 第 3.7 步 FastAPI 物种查询契约
+
+```python
+GET /api/species?q=<query>&limit=20
+-> 200 SpeciesSearchResponse
+-> 400  # q 去除首尾/重复空白后为空
+-> 422  # 缺少 q、q 超过 100 字符、limit 不在 1–50 或类型错误
+```
+
+- `q` 必填，先做 NFKC Unicode 规范化、折叠连续空白并去除首尾空白；规范化后为空返回 400。
+  `limit` 默认 20，允许 1–50。响应使用 `{items: [...]}` 信封；没有匹配是 200 空列表。
+- 查询同时覆盖 `canonical_chinese_name`、可空 `scientific_name` 和 `aliases` 数组中的每个别名，
+  使用大小写不敏感子串匹配；`%`、`_` 等 SQL 通配符必须按普通字符处理。
+- 排序按确定性相关度进行：规范中文名完全匹配、科学名完全匹配、别名完全匹配、规范中文名
+  前缀、科学名前缀、别名前缀、普通子串；同级按规范中文名、科学名、taxonomy key 和 UUID
+  稳定排序。limit 在排序后截取。
+- `SpeciesSearchItem` 只公开 `species_id`、规范中文名、可空科学名和别名，不暴露或要求前端理解
+  `taxonomy_source/taxonomy_key`。返回的 `species_id` 可直接用于 3.5 PATCH。
+- 查询直接在 PostgreSQL 完成过滤和 limit，不把 11,167 条名录全部加载进应用内存；不调用
+  LLM/懂鸟/eBird 网络，不修改名录或任何其他业务表。
+
 ---
 
 ## 7. 批量处理与权限流程（后续第 2 步）
@@ -866,6 +893,8 @@ React 实现应以共享设计 token 和可复用业务组件表达上述设计�
   未知/不可编辑字段、未知 observation/species、事务回滚、照片/session/身份与列表顺序不变。
 - 3.6 单独覆盖观测删除 HTTP：204 空响应、未知/重复/非法 ID、列表和详情消失、同 session 其他
   记录保留、照片仅解除 observation 关联、session/物种/文件保留，以及 v1 无 session 记录删除。
+- 3.7 单独覆盖物种查询 HTTP：三类名称字段、完全/前缀/子串排序、大小写/Unicode/空白、字面量
+  通配符、limit、空结果、400/422、公开字段边界，以及零网络和零数据库写入。
 
 ---
 
@@ -886,7 +915,8 @@ React 实现应以共享设计 token 和可复用业务组件表达上述设计�
 | 3.4 FastAPI 观测读取 | `GET /api/observations` 列表/筛选和 `GET /api/observations/{id}` 详情，返回照片与 session 上下文。 | HTTP 客户端覆盖筛选、顺序、详情/404、字段边界和零副作用。 |
 | 3.5 FastAPI 观测编辑 | `PATCH /api/observations/{id}` 局部更新管理字段，不改变记录身份、session 或照片归属。 | HTTP 客户端覆盖字段语义、物种一致性、错误回滚及只读关系不变。 |
 | 3.6 FastAPI 观测删除 | `DELETE /api/observations/{id}` 删除单条记录，保留 session、照片元数据和媒体文件。 | HTTP 客户端覆盖 204/404/422、外键解除、审计/文件保留和 v1 记录。 |
-| 3.7–3.x Web 后续 | 接 species API，再按第 8 节实现 React 输入页、管理页和响应式布局。 | API 逐切片验收；UI 覆盖两页完整流程及 1024/736/360px。 |
+| 3.7 FastAPI 物种查询 | `GET /api/species` 从本地名录提供有界、稳定排序的名称联想。 | HTTP 客户端覆盖字段、匹配/排序、边界错误和零副作用。 |
+| 3.8–3.x React | 按第 8 节实现输入页、管理页和响应式布局；需要时先冻结 CORS/开发代理契约。 | UI 覆盖两页完整流程及 1024/736/360px。 |
 | 4. 收尾 | README / STATUS / DECISIONS 更新，最终回归，打 `v2.0` tag。 | 文档、测试、发布状态一致。 |
 
 ---

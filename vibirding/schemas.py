@@ -497,6 +497,25 @@ class ObservationUpdateRequest(BaseModel):
         return self
 
 
+class SpeciesSearchItem(BaseModel):
+    """Public species suggestion for management form selection."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    species_id: UUID
+    canonical_chinese_name: str
+    scientific_name: str | None = None
+    aliases: list[str] = Field(default_factory=list)
+
+
+class SpeciesSearchResponse(BaseModel):
+    """Bounded species autocomplete response."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    items: list[SpeciesSearchItem]
+
+
 class TraceEvent(BaseModel):
     """One line logged per loop step (observability)."""
 

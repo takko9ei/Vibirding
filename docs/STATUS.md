@@ -21,7 +21,8 @@
 - v2 **3.3 FastAPI 批量确认写入已实现、验证并提交**。
 - v2 **3.4 FastAPI 观测读取已实现、验证并提交**。
 - v2 **3.5 FastAPI 观测编辑已实现、验证并提交**。
-- v2 **3.6 FastAPI 观测删除已实现并验证，当前等待 review**。
+- v2 **3.6 FastAPI 观测删除已实现、验证并提交**。
+- v2 **3.7 FastAPI 物种查询已实现并验证，当前等待 review**。
 
 ## v2 第 1 步已交付
 
@@ -51,6 +52,7 @@ JSONB `flags` 和可空 `user_id`。本切片未引入批量、照片、物种�
 | 3.4 FastAPI 观测读取 HTTP 测试 | 42/42 |
 | 3.5 FastAPI 观测编辑 HTTP 测试 | 30/30 |
 | 3.6 FastAPI 观测删除 HTTP 测试 | 28/28 |
+| 3.7 FastAPI 物种查询 HTTP 测试 | 21/21 |
 | PostgreSQL 存储与 v1 Log 兼容语义 | 38/38 |
 | S1/S3/S4/S6 离线自检 | 101/101 |
 | v1 离线 eval | 13/13 |
@@ -179,6 +181,17 @@ JSONB `flags` 和可空 `user_id`。本切片未引入批量、照片、物种�
 - 删除后列表、详情与编辑都不再看到目标；媒体 URL 仍可读取。v1 无 session 的兼容记录使用
   同一端点删除，不需要特殊分支。
 
+## v2 3.7 本次交付
+
+- 新增 `GET /api/species?q=&limit=`，默认返回最多 20 条、上限 50 条本地物种建议；缺少或非法
+  参数返回 400/422，无匹配返回 200 空列表。
+- 同时搜索规范中文名、科学名与 JSONB aliases，大小写不敏感并把 `%`/`_` 当普通字符；输入
+  先做 NFKC 和空白规范化。
+- 结果按完全匹配、前缀匹配、普通子串的字段优先级排序，再以名称和稳定键排序；只公开
+  `species_id`、规范中文名、学名和别名，可直接供 3.5 编辑 API 使用。
+- 过滤、排序和 limit 均在 PostgreSQL 内完成，不把完整名录加载进应用内存；开发库 11,167
+  条真实名录的 `Corvus` 查询实测约 68 ms，不访问 eBird 或修改数据库。
+
 ## 运行要求
 
 1. `.env` 设置 `DATABASE_URL`；本地默认值见根目录 `.env.example`。
@@ -204,6 +217,7 @@ PostgreSQL volume 持久保存数据；`docker compose down -v` 会删除该 vol
 - `scripts/check_v2_observation_reads_api.py`：3.4 观测列表、筛选、详情和零副作用验证。
 - `scripts/check_v2_observation_edit_api.py`：3.5 局部编辑、物种一致性、错误回滚和关系不变验证。
 - `scripts/check_v2_observation_delete_api.py`：3.6 删除响应、关系解除、审计/媒体保留和 v1 删除验证。
+- `scripts/check_v2_species_api.py`：3.7 名称搜索、相关度排序、参数边界和零副作用验证。
 - `scripts/import_ebird_taxonomy.py`：从 eBird API 幂等导入当前物种名录。
 - `scripts/db_test_support.py`：测试 schema 隔离。
 - `scripts/run_s2.py`：Gemini 备用 provider 手动冒烟。
@@ -214,4 +228,4 @@ PostgreSQL volume 持久保存数据；`docker compose down -v` 会删除该 vol
 
 ## 当前 review 边界
 
-当前只 review 3.6 FastAPI 观测删除；通过并提交后再开始 3.7，不得提前接入 species API 或 React。
+当前只 review 3.7 FastAPI 物种查询；通过并提交后再开始 3.8，不得提前接入 CORS 或 React。

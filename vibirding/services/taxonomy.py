@@ -14,6 +14,8 @@ from ..schemas import (
     SpeciesCatalogEntry,
     SpeciesLookup,
     SpeciesRecord,
+    SpeciesSearchItem,
+    SpeciesSearchResponse,
     TaxonomyResolution,
 )
 
@@ -24,6 +26,10 @@ class TaxonomySourceError(RuntimeError):
 
 class TaxonomyImportError(ValueError):
     """A catalog batch is ambiguous and must not be imported."""
+
+
+class TaxonomyQueryError(ValueError):
+    """A local catalog search query is empty or out of bounds."""
 
 
 class EbirdTaxonomyAdapter:
@@ -128,6 +134,29 @@ class TaxonomyService:
         with self._session_factory() as session:
             records = SpeciesRepository(session).list_all()
         return [self._resolve(lookup, records) for lookup in lookups]
+
+    def search(self, query: str, limit: int = 20) -> SpeciesSearchResponse:
+        """Return bounded local suggestions without contacting eBird."""
+        normalized = unicodedata.normalize("NFKC", query)
+        cleaned = " ".join(normalized.split())
+        if not cleaned:
+            raise TaxonomyQueryError("q must not be blank")
+        if not 1 <= limit <= 50:
+            raise TaxonomyQueryError("limit must be between 1 and 50")
+
+        with self._session_factory() as session:
+            records = SpeciesRepository(session).search(cleaned, limit)
+        return SpeciesSearchResponse(
+            items=[
+                SpeciesSearchItem(
+                    species_id=record.id,
+                    canonical_chinese_name=record.canonical_chinese_name,
+                    scientific_name=record.scientific_name,
+                    aliases=list(record.aliases),
+                )
+                for record in records
+            ]
+        )
 
     @staticmethod
     def _clean_entry(entry: SpeciesCatalogEntry) -> SpeciesCatalogEntry:

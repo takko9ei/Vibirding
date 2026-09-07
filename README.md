@@ -87,7 +87,7 @@ python scripts/import_ebird_taxonomy.py
 以上三条命令分别负责启动本地 PostgreSQL、把数据库结构升级到当前版本，以及从 eBird
 幂等导入当前物种名录。`DATABASE_URL` 已在 `.env.example` 中给出本地默认值。
 
-**启动当前 Web API（v2 3.1–3.6）**：
+**启动当前 Web API（v2 3.1–3.7）**：
 
 ```bash
 python -m uvicorn vibirding.api.app:create_app --factory --reload
@@ -163,6 +163,16 @@ DELETE /api/observations/<observation_id>
 
 成功返回空响应 `204 No Content`。删除 observation 不会删除它所属的 session、照片元数据或
 磁盘图片；照片只会解除与该 observation 的关联，媒体 URL 仍可访问。
+
+编辑表单的物种联想直接查询本地名录：
+
+```text
+GET /api/species?q=乌鸦
+GET /api/species?q=Corvus&limit=10
+```
+
+它会搜索规范中文名、科学名和别名，并按完全匹配、前缀匹配、子串匹配排序。默认最多返回
+20 条，不调用 eBird 网络，因此不会消耗 API 配额。
 
 **API key（在 `.env` 里配）**：
 
@@ -282,7 +292,8 @@ docker-compose.yml  # 本地 PostgreSQL 服务
 - **3.3 已完成并提交**：FastAPI 明确确认后的批量写入、事务与部分成功响应。
 - **3.4 已完成并提交**：FastAPI 最新记录列表、筛选、照片与 session 详情读取。
 - **3.5 已完成并提交**：FastAPI 观测记录局部编辑与事务回滚。
-- **3.6 已实现、待 review**：FastAPI 单条观测删除，并保留 session 与媒体审计。
-- **3.7–3.x**：接入 species API，再实现 React 输入预览页、记录管理页和响应式布局。
+- **3.6 已完成并提交**：FastAPI 单条观测删除，并保留 session 与媒体审计。
+- **3.7 已实现、待 review**：FastAPI 本地物种名录查询与稳定相关度排序。
+- **3.8–3.x**：实现 React 输入预览页、记录管理页和响应式布局，需要时先冻结开发代理/CORS 契约。
 
 完整范围与切片顺序见 [docs/architecture.md](docs/architecture.md) §10。

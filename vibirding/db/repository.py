@@ -6,7 +6,7 @@ import uuid
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import Select, select
+from sqlalchemy import Select, case, exists, func, or_, select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
 
@@ -224,6 +224,71 @@ class SpeciesRepository:
     def get_by_id(self, species_id: uuid.UUID) -> SpeciesRow | None:
         """Read one taxonomy row by its stable internal UUID."""
         return self._session.get(SpeciesRow, species_id)
+
+    def search(self, query: str, limit: int) -> list[SpeciesRecord]:
+        """Search public species names with deterministic relevance ordering."""
+        canonical_exact = func.lower(
+            SpeciesRow.canonical_chinese_name
+        ) == query.casefold()
+        scientific_exact = func.lower(SpeciesRow.scientific_name) == query.casefold()
+        alias_exact = self._alias_match(query, "exact")
+        canonical_prefix = SpeciesRow.canonical_chinese_name.istartswith(
+            query, autoescape=True
+        )
+        scientific_prefix = SpeciesRow.scientific_name.istartswith(
+            query, autoescape=True
+        )
+        alias_prefix = self._alias_match(query, "prefix")
+        canonical_contains = SpeciesRow.canonical_chinese_name.icontains(
+            query, autoescape=True
+        )
+        scientific_contains = SpeciesRow.scientific_name.icontains(
+            query, autoescape=True
+        )
+        alias_contains = self._alias_match(query, "contains")
+
+        relevance = case(
+            (canonical_exact, 0),
+            (scientific_exact, 1),
+            (alias_exact, 2),
+            (canonical_prefix, 3),
+            (scientific_prefix, 4),
+            (alias_prefix, 5),
+            else_=6,
+        )
+        statement = (
+            select(SpeciesRow)
+            .where(
+                or_(
+                    canonical_contains,
+                    scientific_contains,
+                    alias_contains,
+                )
+            )
+            .order_by(
+                relevance,
+                func.lower(SpeciesRow.canonical_chinese_name),
+                func.lower(func.coalesce(SpeciesRow.scientific_name, "")),
+                SpeciesRow.taxonomy_key,
+                SpeciesRow.id,
+            )
+            .limit(limit)
+        )
+        return [_to_species(row) for row in self._session.scalars(statement)]
+
+    @staticmethod
+    def _alias_match(query: str, mode: str):
+        aliases = func.jsonb_array_elements_text(
+            SpeciesRow.aliases
+        ).table_valued("value", joins_implicitly=True)
+        value = aliases.c.value
+        if mode == "exact":
+            predicate = func.lower(value) == query.casefold()
+        elif mode == "prefix":
+            predicate = value.istartswith(query, autoescape=True)
+        else:
+            predicate = value.icontains(query, autoescape=True)
+        return exists(select(1).select_from(aliases).where(predicate))
 
 
 class SessionRepository:
