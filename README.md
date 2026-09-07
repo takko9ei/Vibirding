@@ -203,6 +203,18 @@ python scripts/check_v2_api_acceptance.py     # 应 37/37
 该脚本使用独立临时数据库 schema 和媒体目录，通过真实 HTTP 走完上传、解析、确认、读取、
 物种查询、编辑和删除；结束后会自动清理测试数据。
 
+**启动本地网页（另开一个终端，先保持 FastAPI 正在运行）：**
+
+```bash
+cd frontend
+npm install
+npm run dev
+```
+
+浏览器打开 <http://127.0.0.1:5173/>。网页开发服务器会把 `/api` 和 `/media` 自动转发给
+`http://127.0.0.1:8000`；需要修改目标时，复制 `frontend/.env.example` 为 `.env` 后调整
+`VITE_API_TARGET`。当前 3.9 只包含两个响应式页面骨架，业务交互从 3.10 开始接入。
+
 ---
 
 ## 用法
@@ -277,7 +289,7 @@ vibirding/          # 主包：cli 入口 + 循环 + 工具 + 记忆 + harness +
 ├── tools/          #   registry + read_log/range_check/bird_id/append_log
 ├── db/             #   SQLAlchemy session / ORM / repository
 ├── services/       #   文本/照片解析、名录匹配、预览组装、批量确认写入
-├── api/            #   FastAPI 工厂与媒体上传接口
+├── api/            #   FastAPI 工厂与 3.1–3.7 HTTP 接口
 ├── memory/         #   log.py：保持 v1 append/query 外观
 ├── harness/        #   permissions / budget / trace
 └── llm/            #   deepseek_client（运行时）· mock（离线）· client（Gemini 备用）
@@ -287,6 +299,7 @@ scripts/            # check_sX/check_v2_db 自检 + 少量专项手动入口
 docs/               # architecture.md（唯一事实来源）· STATUS.md（进度快照）
 data/               # gitignore：运行时 JSONL trace（按需自动创建）
 docker-compose.yml  # 本地 PostgreSQL 服务
+frontend/           # Vite + React + TypeScript 双页 Web 应用
 ```
 
 ---
@@ -303,8 +316,12 @@ docker-compose.yml  # 本地 PostgreSQL 服务
 - **3.5 已完成并提交**：FastAPI 观测记录局部编辑与事务回滚。
 - **3.6 已完成并提交**：FastAPI 单条观测删除，并保留 session 与媒体审计。
 - **3.7 已完成并提交**：FastAPI 本地物种名录查询与稳定相关度排序。
-- **3.8 已实现、待 review**：真实 Uvicorn 下的 API 完整生命周期、OpenAPI 与全量回归验收。
-- **3.9**：搭建 React + TypeScript 基础工程、双路由、共享设计 token、API client 与开发代理。
-- **3.10–3.12**：实现输入流程、记录管理流程，再完成端到端和响应式总体验收。
+- **3.8 已完成并提交**：真实 Uvicorn 下的 API 完整生命周期、OpenAPI 与全量回归验收。
+- **3.9 已实现、待 review**：React + TypeScript 基础工程、双路由、共享设计 token、API client 与开发代理。
+- **2.6 待补齐**：增加原始需求承诺的 v2 固定离线 eval；3.9 提交后优先执行。
+- **3.10**：实现输入流程，包括上传、解析预览、草稿编辑和确认写入。
+- **3.11**：实现记录管理流程，包括筛选、详情、物种联想、编辑和删除。
+- **3.12**：完成两页端到端、视觉、键盘、触控和响应式总体验收。
+- **4**：最终文档与全量回归，用户确认后打 `v2.0` tag。
 
 完整范围与切片顺序见 [docs/architecture.md](docs/architecture.md) §10。

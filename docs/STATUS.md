@@ -23,7 +23,10 @@
 - v2 **3.5 FastAPI 观测编辑已实现、验证并提交**。
 - v2 **3.6 FastAPI 观测删除已实现、验证并提交**。
 - v2 **3.7 FastAPI 物种查询已实现、验证并提交**。
-- v2 **3.8 API 总体验收已实现并通过，当前等待 review**。
+- v2 **3.8 API 总体验收已实现、验证并提交**。
+- v2 **3.9 React 基础工程已实现并通过验证，当前等待 review**。
+- 计划校准发现原始需求中的 **2.6 v2 固定 eval 尚未实现**；3.9 review/提交后先补 2.6，
+  再进入 3.10。
 
 ## v2 第 1 步已交付
 
@@ -55,6 +58,8 @@ JSONB `flags` 和可空 `user_id`。本切片未引入批量、照片、物种�
 | 3.6 FastAPI 观测删除 HTTP 测试 | 28/28 |
 | 3.7 FastAPI 物种查询 HTTP 测试 | 21/21 |
 | 3.8 真实 Uvicorn API 完整生命周期验收 | 37/37 |
+| 3.9 TypeScript / lint / production build | 全部通过 |
+| 3.9 双路由与 Vite → FastAPI 开发代理 | HTTP 200 |
 | 3.1–3.7 API 切片回归合计 | 242/242 |
 | 2.1–2.5 v2 服务回归合计 | 156/156 |
 | PostgreSQL 存储与 v1 Log 兼容语义 | 38/38 |
@@ -210,6 +215,21 @@ JSONB `flags` 和可空 `user_id`。本切片未引入批量、照片、物种�
 - 重新运行全部 3.1–3.7 API、2.1–2.5 服务、migration、v1 自检和离线 eval；本轮合计
   611/611 通过，开发库没有留下验收数据。
 
+## v2 3.9 本次交付
+
+- 新增 `frontend/` 独立 npm 工程，使用 Vite、React、TypeScript 与 React Router；`/` 固定为
+  “记一笔”，`/observations` 固定为“观察记录”，未知路径回到首页。
+- 两页共用顶部品牌与双导航，建立输入页 40/60、管理页 65/35 的 PC 工作区骨架，并在
+  850px / 560px 两档重排为平板和手机布局；本切片只展示静态空状态，不调用 API。
+- 视觉 token 集中定义奶油底色、黄/珊瑚红/青绿/柔紫强调色、粗边框、硬阴影、圆角、间距、
+  字体与焦点环，页面组件不各自复制主题常量。
+- 新增类型化 API client，覆盖 3.1–3.7 全部公开请求与响应；集中处理 JSON、FormData、204
+  空响应和结构化错误，但尚未被页面业务流程调用。
+- Vite 将相对 `/api`、`/media` 请求代理到 `VITE_API_TARGET`，默认本机 8000 端口；实际通过
+  前端端口查询 FastAPI 物种接口返回 200，后端无需开放 CORS。
+- `npm run typecheck`、`npm run lint` 和 `npm run build` 全部通过；两个前端路由均返回 200，
+  v1 离线 eval 保持 13/13。
+
 ## 运行要求
 
 1. `.env` 设置 `DATABASE_URL`；本地默认值见根目录 `.env.example`。
@@ -218,6 +238,7 @@ JSONB `flags` 和可空 `user_id`。本切片未引入批量、照片、物种�
 4. `python scripts/import_ebird_taxonomy.py` 导入/更新物种名录。
 5. `python -m vibirding "<笔记或查询>"` 运行正式 CLI。
 6. `python -m uvicorn vibirding.api.app:create_app --factory --reload` 启动当前 Web API。
+7. 在 `frontend/` 执行 `npm install` 和 `npm run dev` 启动本地网页。
 
 PostgreSQL volume 持久保存数据；`docker compose down -v` 会删除该 volume，不应作为普通
 停止命令使用。
@@ -237,6 +258,7 @@ PostgreSQL volume 持久保存数据；`docker compose down -v` 会删除该 vol
 - `scripts/check_v2_observation_delete_api.py`：3.6 删除响应、关系解除、审计/媒体保留和 v1 删除验证。
 - `scripts/check_v2_species_api.py`：3.7 名称搜索、相关度排序、参数边界和零副作用验证。
 - `scripts/check_v2_api_acceptance.py`：3.8 真实 Uvicorn、完整 API 生命周期、OpenAPI 与隔离清理验收。
+- `frontend/`：3.9 React 基础工程；`npm run typecheck` / `npm run lint` / `npm run build` 验证。
 - `scripts/import_ebird_taxonomy.py`：从 eBird API 幂等导入当前物种名录。
 - `scripts/db_test_support.py`：测试 schema 隔离。
 - `scripts/run_s2.py`：Gemini 备用 provider 手动冒烟。
@@ -247,4 +269,5 @@ PostgreSQL volume 持久保存数据；`docker compose down -v` 会删除该 vol
 
 ## 当前 review 边界
 
-当前只 review 3.8 API 总体验收；通过并提交后再开始 3.9 React 基础工程，不得提前实现输入页。
+当前只 review 3.9 React 基础工程；通过并提交后，下一个开发切片是 2.6 v2 固定 eval。
+固定后续顺序为 `2.6 → 3.10 → 3.11 → 3.12 → 4`，不得跳步或临时改号。
