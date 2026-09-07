@@ -112,3 +112,5 @@ export const apiClient = {
     return request(`/api/species?${params.toString()}`)
   },
 }
+
+export type ApiClient = typeof apiClient

@@ -54,7 +54,8 @@ body {
 
 button,
 input,
-textarea {
+textarea,
+select {
   color: inherit;
   font: inherit;
 }
@@ -62,14 +63,16 @@ textarea {
 button,
 a,
 input,
-textarea {
+textarea,
+select {
   outline: none;
 }
 
 button:focus-visible,
 a:focus-visible,
 input:focus-visible,
-textarea:focus-visible {
+textarea:focus-visible,
+select:focus-visible {
   box-shadow: var(--focus-ring);
 }
 
@@ -347,7 +350,8 @@ h3 {
 }
 
 textarea,
-input {
+input,
+select {
   width: 100%;
   border: var(--border-light);
   border-radius: var(--radius-medium);
@@ -370,6 +374,7 @@ input::placeholder {
 
 .photo-drop {
   display: flex;
+  width: 100%;
   min-height: 94px;
   align-items: center;
   gap: var(--space-3);
@@ -378,6 +383,8 @@ input::placeholder {
   border: 2px dashed var(--color-ink);
   border-radius: var(--radius-medium);
   background: rgb(255 253 247 / 72%);
+  text-align: left;
+  cursor: pointer;
 }
 
 .photo-drop__icon {
@@ -394,7 +401,14 @@ input::placeholder {
 }
 
 .photo-drop strong {
+  display: block;
   font-size: 1rem;
+}
+
+.photo-drop small {
+  display: block;
+  margin-top: 0.2rem;
+  color: var(--color-muted);
 }
 
 .photo-drop p,
@@ -427,6 +441,11 @@ input::placeholder {
 
 .button--compact {
   padding: 0.7rem 1rem;
+}
+
+.button--secondary {
+  padding: 0.75rem 1rem;
+  background: var(--color-surface);
 }
 
 .button--filter {
@@ -528,6 +547,321 @@ input::placeholder {
   background: rgb(255 253 247 / 55%);
 }
 
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.photo-grid,
+.draft-list,
+.write-result ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.photo-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-2);
+  margin-bottom: var(--space-3);
+}
+
+.photo-tile {
+  min-width: 0;
+  overflow: hidden;
+  border: var(--border-light);
+  border-radius: var(--radius-medium);
+  background: var(--color-surface);
+}
+
+.photo-tile--success {
+  box-shadow: 3px 3px 0 var(--color-mint);
+}
+
+.photo-tile--error {
+  box-shadow: 3px 3px 0 var(--color-coral);
+}
+
+.photo-tile img {
+  display: block;
+  width: 100%;
+  aspect-ratio: 16 / 10;
+  border-bottom: var(--border-light);
+  object-fit: cover;
+}
+
+.photo-tile__body {
+  display: grid;
+  gap: 0.45rem;
+  padding: var(--space-2);
+}
+
+.photo-tile__body > strong {
+  overflow: hidden;
+  font-size: 0.875rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.status-label,
+.photo-tile label span,
+.draft-fields label span,
+.confirm-bar span,
+.draft-photos span,
+.write-result li span {
+  display: block;
+  color: var(--color-muted);
+  font-size: 0.8rem;
+  font-weight: 700;
+}
+
+.photo-tile select,
+.draft-fields input {
+  min-height: 42px;
+  padding: 0.45rem 0.55rem;
+}
+
+.photo-tile__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+}
+
+.photo-tile__actions button {
+  min-height: 36px;
+  padding: 0.3rem 0.65rem;
+  border: var(--border-light);
+  border-radius: 8px;
+  background: var(--color-surface);
+  font-size: 0.8rem;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.error-box,
+.warning-box,
+.warning-list {
+  display: grid;
+  gap: 0.25rem;
+  margin-bottom: var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  border: var(--border-light);
+  border-radius: var(--radius-medium);
+  background: #ffe0dd;
+}
+
+.warning-box,
+.warning-list {
+  background: #fff2ad;
+}
+
+.warning-list ul {
+  margin: 0;
+  padding-left: 1.25rem;
+}
+
+.empty-state--busy .empty-state__mark {
+  background: var(--color-yellow);
+  animation: busy-turn 1.4s steps(4, end) infinite;
+}
+
+.preview-content,
+.draft-list {
+  display: grid;
+  gap: var(--space-3);
+}
+
+.draft-card {
+  min-width: 0;
+  padding: var(--space-3);
+  border: var(--border-light);
+  border-radius: var(--radius-medium);
+  background: var(--color-surface);
+  box-shadow: var(--shadow-small);
+}
+
+.draft-card__header {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--space-2);
+  margin-bottom: var(--space-3);
+}
+
+.draft-card__header p,
+.draft-card__header h3 {
+  margin-bottom: 0;
+}
+
+.draft-card__number {
+  display: grid;
+  width: 46px;
+  height: 46px;
+  place-items: center;
+  border: var(--border-light);
+  border-radius: 10px;
+  background: var(--color-coral);
+  font-family: var(--font-display);
+}
+
+.source-badge {
+  padding: 0.3rem 0.55rem;
+  border: var(--border-light);
+  border-radius: 999px;
+  background: var(--color-mint);
+  font-size: 0.75rem;
+  font-weight: 900;
+}
+
+.draft-fields {
+  display: grid;
+  grid-template-columns: 1.25fr 0.75fr;
+  gap: var(--space-2);
+}
+
+.draft-meta {
+  display: flex;
+  min-width: 0;
+  flex-wrap: wrap;
+  gap: 0.35rem var(--space-3);
+  margin-bottom: var(--space-3);
+  color: var(--color-muted);
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  font-size: 0.75rem;
+  font-weight: 700;
+}
+
+.draft-meta span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.draft-fields__wide,
+.draft-fields__full {
+  grid-column: 1 / -1;
+}
+
+.draft-fields textarea {
+  min-height: 92px;
+  padding: var(--space-2);
+}
+
+.draft-photos {
+  display: grid;
+  gap: var(--space-1);
+  margin-top: var(--space-3);
+  padding-top: var(--space-3);
+  border-top: 2px dashed var(--color-ink);
+}
+
+.draft-photos__list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+}
+
+.draft-photos img {
+  width: 70px;
+  height: 58px;
+  border: var(--border-light);
+  border-radius: 8px;
+  object-fit: cover;
+}
+
+.confirm-bar {
+  position: sticky;
+  bottom: var(--space-2);
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: var(--space-3);
+  border: var(--border-strong);
+  border-radius: var(--radius-medium);
+  background: var(--color-mint);
+  box-shadow: var(--shadow-small);
+}
+
+.confirm-bar__actions {
+  display: flex;
+  gap: var(--space-2);
+}
+
+.confirm-bar .button--primary {
+  width: auto;
+  padding: 0.75rem 1rem;
+}
+
+.write-result {
+  display: grid;
+  gap: var(--space-4);
+  min-height: 430px;
+  align-content: center;
+  padding: clamp(1rem, 4vw, 2.5rem);
+  border: var(--border-strong);
+  border-radius: var(--radius-medium);
+  background: #d8f7ef;
+}
+
+.write-result--partial {
+  background: #fff2ad;
+}
+
+.write-result--failed {
+  background: #ffe0dd;
+}
+
+.write-result__mark {
+  display: grid;
+  width: 68px;
+  height: 68px;
+  place-items: center;
+  border: var(--border-strong);
+  border-radius: 50%;
+  background: var(--color-surface);
+  box-shadow: var(--shadow-small);
+  font-family: var(--font-display);
+  font-size: 2rem;
+}
+
+.write-result code {
+  overflow-wrap: anywhere;
+}
+
+.write-result section {
+  padding: var(--space-3);
+  border: var(--border-light);
+  border-radius: var(--radius-medium);
+  background: var(--color-surface);
+}
+
+.write-result h4 {
+  margin: 0 0 var(--space-2);
+}
+
+.write-result li {
+  display: grid;
+  gap: 0.1rem;
+  padding-block: 0.35rem;
+}
+
+.write-result li + li {
+  border-top: 1px solid var(--color-muted);
+}
+
+@keyframes busy-turn {
+  to {
+    transform: rotate(1turn);
+  }
+}
+
 @media (max-width: 850px) {
   .topbar {
     grid-template-columns: 1fr auto;
@@ -571,6 +905,10 @@ input::placeholder {
   .capture-grid,
   .records-grid {
     grid-template-columns: minmax(0, 1fr);
+  }
+
+  .confirm-bar {
+    position: static;
   }
 
   .filters {
@@ -676,17 +1014,49 @@ input::placeholder {
   .empty-state__tags {
     flex-direction: column;
   }
+
+  .photo-grid,
+  .draft-fields {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .draft-fields__wide,
+  .draft-fields__full {
+    grid-column: auto;
+  }
+
+  .draft-card__header {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+
+  .source-badge {
+    grid-column: 1 / -1;
+    justify-self: start;
+  }
+
+  .confirm-bar,
+  .confirm-bar__actions {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .confirm-bar .button,
+  .confirm-bar .button--primary {
+    width: 100%;
+  }
 }
 
 @media (prefers-reduced-motion: no-preference) {
   .button:not(:disabled),
   .top-nav__link,
-  .brand {
+  .brand,
+  .photo-drop:not(:disabled) {
     transition: transform 120ms ease, box-shadow 120ms ease;
   }
 
   .button:not(:disabled):hover,
-  .brand:hover {
+  .brand:hover,
+  .photo-drop:not(:disabled):hover {
     transform: translate(-2px, -2px);
   }
 }

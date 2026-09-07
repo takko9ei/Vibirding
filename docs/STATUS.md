@@ -25,7 +25,8 @@
 - v2 **3.7 FastAPI 物种查询已实现、验证并提交**。
 - v2 **3.8 API 总体验收已实现、验证并提交**。
 - v2 **3.9 React 基础工程已实现、验证并提交**。
-- 原始需求中遗漏的 **2.6 v2 固定 eval 已补齐并通过验证，当前等待 review**。
+- 原始需求中遗漏的 **2.6 v2 固定 eval 已补齐、验证并提交**。
+- v2 **3.10 React 输入流程已实现并通过自动验收，当前等待 review**。
 
 ## v2 第 1 步已交付
 
@@ -59,6 +60,9 @@ JSONB `flags` 和可空 `user_id`。本切片未引入批量、照片、物种�
 | 3.8 真实 Uvicorn API 完整生命周期验收 | 37/37 |
 | 3.9 TypeScript / lint / production build | 全部通过 |
 | 3.9 双路由与 Vite → FastAPI 开发代理 | HTTP 200 |
+| 3.10 React 输入流程自动验收 | 7/7 |
+| 3.10 TypeScript / lint / production build | 全部通过 |
+| 3.10 本地网页入口 | HTTP 200 |
 | 2.6 v2 固定离线 eval | 6/6 |
 | 2.6 本轮回归（v2 领域 + v1 eval） | 169/169 |
 | 2.6 本轮全部自动检查 | 175/175 |
@@ -244,6 +248,22 @@ JSONB `flags` 和可空 `user_id`。本切片未引入批量、照片、物种�
   不调用外部网络，也不写开发库。
 - v2 固定 eval 为 6/6，2.1–2.5 领域回归为 156/156，v1 离线 eval 为 13/13。
 
+## v2 3.10 本次交付
+
+- “记一笔”页面已接通照片上传、同步解析预览和明确确认写入；纯文本、纯照片和图文混合共用
+  同一流程，未点击确认按钮前不会调用写入 API。
+- 每张 JPEG 独立显示上传中、成功、失败、重试和移除状态；前端先做格式/2 MiB 快速检查，
+  只有成功的媒体 ID 参与解析和写入，后端仍负责最终校验。
+- 解析结果按原顺序显示为可编辑草稿卡片，展示来源、置信度、警告、flags 和照片；用户可修改
+  业务字段并把每张照片改派到任一草稿或留在批次中不写入观测。
+- 输入改变后旧预览会被标为需重新整理；parse 失败保留文字和照片并允许直接重试。解析和写入
+  pending 时均防重复提交，写入错误不会自动重试。
+- 写入结果在当前页面分别展示全部成功、部分成功和全部失败；部分成功同时列出成功记录和每条
+  失败原因，可清空工作区开始下一笔。
+- 新增 Vitest + Testing Library 验收，7/7 覆盖三种输入、上传失败重试、parse 失败重试、草稿
+  编辑、照片改派、显式确认、部分成功以及 pending 防重复；typecheck、lint、build 全部通过。
+- 本轮复跑 v1 离线 eval 13/13、v2 固定 eval 6/6；未调用 DeepSeek、懂鸟或 eBird 网络。
+
 ## 运行要求
 
 1. `.env` 设置 `DATABASE_URL`；本地默认值见根目录 `.env.example`。
@@ -272,7 +292,8 @@ PostgreSQL volume 持久保存数据；`docker compose down -v` 会删除该 vol
 - `scripts/check_v2_observation_delete_api.py`：3.6 删除响应、关系解除、审计/媒体保留和 v1 删除验证。
 - `scripts/check_v2_species_api.py`：3.7 名称搜索、相关度排序、参数边界和零副作用验证。
 - `scripts/check_v2_api_acceptance.py`：3.8 真实 Uvicorn、完整 API 生命周期、OpenAPI 与隔离清理验收。
-- `frontend/`：3.9 React 基础工程；`npm run typecheck` / `npm run lint` / `npm run build` 验证。
+- `frontend/`：3.9–3.10 React 应用与输入流程；`npm test` / `npm run typecheck` /
+  `npm run lint` / `npm run build` 验证。
 - `scripts/import_ebird_taxonomy.py`：从 eBird API 幂等导入当前物种名录。
 - `scripts/db_test_support.py`：测试 schema 隔离。
 - `scripts/run_s2.py`：Gemini 备用 provider 手动冒烟。
@@ -284,5 +305,5 @@ PostgreSQL volume 持久保存数据；`docker compose down -v` 会删除该 vol
 
 ## 当前 review 边界
 
-当前只 review 2.6 v2 固定 eval；通过并提交后，下一个开发切片是 3.10 React 输入流程。
-固定后续顺序为 `3.10 → 3.11 → 3.12 → 4`，不得跳步或临时改号。
+当前只 review 3.10 React 输入流程；通过并提交后，下一个开发切片是 3.11 React 管理流程。
+固定后续顺序为 `review/提交 3.10 → 3.11 → 3.12 → 4`，不得跳步或临时改号。
