@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime
+from typing import Any
 
 from sqlalchemy import Select, select
 from sqlalchemy.dialects.postgresql import insert
@@ -108,6 +109,26 @@ class ObservationRepository:
         """Read one observation by its public UUID."""
         return self._session.get(ObservationRow, observation_id)
 
+    def get_for_update(
+        self, observation_id: uuid.UUID
+    ) -> ObservationRow | None:
+        """Lock one observation until the caller's transaction finishes."""
+        return self._session.scalar(
+            select(ObservationRow)
+            .where(ObservationRow.id == observation_id)
+            .with_for_update()
+        )
+
+    def update_fields(
+        self,
+        row: ObservationRow,
+        changes: dict[str, Any],
+    ) -> None:
+        """Stage an already validated set of editable database fields."""
+        for field_name, value in changes.items():
+            setattr(row, field_name, value)
+        self._session.flush()
+
     def append_draft(
         self,
         draft: DraftObservation,
@@ -194,6 +215,10 @@ class SpeciesRepository:
             )
         ).all()
         return [_to_species(row) for row in rows]
+
+    def get_by_id(self, species_id: uuid.UUID) -> SpeciesRow | None:
+        """Read one taxonomy row by its stable internal UUID."""
+        return self._session.get(SpeciesRow, species_id)
 
 
 class SessionRepository:

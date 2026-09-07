@@ -1,4 +1,4 @@
-"""FastAPI factory for v2 media, parse, confirmed writes, and reads."""
+"""FastAPI factory for v2 media, parse, and observation management."""
 
 from __future__ import annotations
 
@@ -28,6 +28,7 @@ from ..schemas import (
     ObservationCreateRequest,
     ObservationDetail,
     ObservationListResponse,
+    ObservationUpdateRequest,
     ParseRequest,
     ParseResult,
 )
@@ -46,9 +47,11 @@ from ..services.media import (
     UnsupportedMediaTypeError,
 )
 from ..services.observations import (
+    ObservationEditService,
     ObservationNotFoundError,
     ObservationQueryError,
     ObservationReadService,
+    ObservationSpeciesNotFoundError,
 )
 from ..services.parse import (
     PhotoPreprocessError,
@@ -92,6 +95,7 @@ def create_app(
         resolved_session_factory
     )
     observation_reader = ObservationReadService(resolved_session_factory)
+    observation_editor = ObservationEditService(resolved_session_factory)
     app = FastAPI(title="Vibirding API", version="2.0.0")
 
     def get_parse_service() -> _ParsesPreview:
@@ -258,6 +262,30 @@ def create_app(
         try:
             return observation_reader.get_observation(observation_id)
         except ObservationNotFoundError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=str(exc),
+            ) from exc
+
+    @app.patch(
+        "/api/observations/{observation_id}",
+        response_model=ObservationDetail,
+        responses={
+            status.HTTP_404_NOT_FOUND: {
+                "description": "Observation or species not found"
+            }
+        },
+    )
+    def update_observation(
+        observation_id: UUID,
+        request: ObservationUpdateRequest,
+    ) -> ObservationDetail:
+        try:
+            return observation_editor.update_observation(
+                observation_id,
+                request,
+            )
+        except (ObservationNotFoundError, ObservationSpeciesNotFoundError) as exc:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail=str(exc),

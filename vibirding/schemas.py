@@ -10,7 +10,7 @@ All models use pydantic for validation.
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import date, datetime
 from typing import Literal
 from uuid import UUID
 
@@ -466,6 +466,35 @@ class ObservationListResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     items: list[ObservationSummary]
+
+
+class ObservationUpdateRequest(BaseModel):
+    """Editable fields accepted by the observation management endpoint."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    place: str | None = None
+    obs_date: date | None = None
+    time_of_day: str | None = None
+    species_label: str | None = None
+    species_id: UUID | None = None
+    count: int | None = None
+    behavior: str | None = None
+    raw_note: str | None = None
+    confidence: float | None = None
+    flags: list[str] | None = None
+
+    @model_validator(mode="after")
+    def require_a_field_and_non_null_required_values(
+        self,
+    ) -> "ObservationUpdateRequest":
+        if not self.model_fields_set:
+            raise ValueError("at least one editable field is required")
+        if "raw_note" in self.model_fields_set and self.raw_note is None:
+            raise ValueError("raw_note cannot be null")
+        if "flags" in self.model_fields_set and self.flags is None:
+            raise ValueError("flags cannot be null")
+        return self
 
 
 class TraceEvent(BaseModel):

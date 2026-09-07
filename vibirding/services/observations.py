@@ -11,6 +11,7 @@ from ..db.repository import (
     ObservationRepository,
     PhotoRepository,
     SessionRepository,
+    SpeciesRepository,
 )
 from ..db.session import SessionFactory
 from ..schemas import (
@@ -19,6 +20,7 @@ from ..schemas import (
     ObservationPhoto,
     ObservationSessionInfo,
     ObservationSummary,
+    ObservationUpdateRequest,
 )
 
 
@@ -28,6 +30,10 @@ class ObservationQueryError(ValueError):
 
 class ObservationNotFoundError(LookupError):
     """The requested observation UUID does not exist."""
+
+
+class ObservationSpeciesNotFoundError(LookupError):
+    """An edit references a taxonomy UUID that does not exist."""
 
 
 class ObservationReadService:
@@ -78,13 +84,7 @@ class ObservationReadService:
                 raise ObservationNotFoundError(
                     f"observation not found: {observation_id}"
                 )
-            photos = PhotoRepository(session).list_for_observations([row.id])
-            session_row = (
-                SessionRepository(session).get_by_id(row.session_id)
-                if row.session_id is not None
-                else None
-            )
-            return self._to_detail(row, photos, session_row)
+            return _detail_for_row(session, row)
 
     @staticmethod
     def _optional_filter(value: str | None) -> str | None:
@@ -163,3 +163,64 @@ class ObservationReadService:
     @staticmethod
     def _photo_url(row: PhotoRow) -> str:
         return f"/media/{row.content_hash}.jpg"
+
+
+class ObservationEditService:
+    """Apply one atomic management edit without changing audit relations."""
+
+    def __init__(self, session_factory: SessionFactory) -> None:
+        self._session_factory = session_factory
+
+    def update_observation(
+        self,
+        observation_id: UUID,
+        request: ObservationUpdateRequest,
+    ) -> ObservationDetail:
+        changes = request.model_dump(exclude_unset=True)
+        with self._session_factory() as session:
+            with session.begin():
+                repository = ObservationRepository(session)
+                row = repository.get_for_update(observation_id)
+                if row is None:
+                    raise ObservationNotFoundError(
+                        f"observation not found: {observation_id}"
+                    )
+
+                self._resolve_species_changes(session, changes)
+                if "obs_date" in changes and changes["obs_date"] is not None:
+                    changes["obs_date"] = changes["obs_date"].isoformat()
+                if "species_label" in changes:
+                    changes["species"] = changes.pop("species_label")
+
+                repository.update_fields(row, changes)
+                return _detail_for_row(session, row)
+
+    @staticmethod
+    def _resolve_species_changes(session, changes: dict) -> None:
+        label_sent = "species_label" in changes
+        species_id_sent = "species_id" in changes
+
+        if label_sent and not species_id_sent:
+            changes["species_id"] = None
+
+        species_id = changes.get("species_id")
+        if not species_id_sent or species_id is None:
+            return
+
+        species_row = SpeciesRepository(session).get_by_id(species_id)
+        if species_row is None:
+            raise ObservationSpeciesNotFoundError(
+                f"species not found: {species_id}"
+            )
+        changes["species_label"] = species_row.canonical_chinese_name
+
+
+def _detail_for_row(session, row: ObservationRow) -> ObservationDetail:
+    """Load immutable relations and reuse the 3.4 public detail mapping."""
+    photos = PhotoRepository(session).list_for_observations([row.id])
+    session_row = (
+        SessionRepository(session).get_by_id(row.session_id)
+        if row.session_id is not None
+        else None
+    )
+    return ObservationReadService._to_detail(row, photos, session_row)

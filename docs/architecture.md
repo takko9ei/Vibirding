@@ -14,10 +14,9 @@
 **v2 的 PostgreSQL 存储底座已经完成。** PostgreSQL、SQLAlchemy、Alembic 和 psycopg 3
 已经替换 JSONL 持久化，并保留 v1 单条 CLI、工具契约与离线 eval 基线。
 
-**2.1–2.5 和 3.1–3.3 已完成、验证并提交，Web 视觉与响应式方向也已确认。3.4 FastAPI
-观测读取已经实现并通过回归，当前等待 review。** 本切片建立观测列表/筛选和单条详情，只读
-返回前端需要的照片与 session 上下文；review 前不得开始编辑、删除、species API、CORS 或
-React。
+**2.1–2.5 和 3.1–3.4 已完成、验证并提交，Web 视觉与响应式方向也已确认。3.5 FastAPI
+观测编辑已经实现并通过回归，当前等待 review。** 本切片建立管理页使用的单条局部更新，
+保持记录身份、批次审计和照片归属不变；review 前不得开始删除、species API、CORS 或 React。
 
 **不迁移旧数据。** v1 真实 `data/` 为空；这次是 schema migration，不是数据 migration。
 
@@ -131,9 +130,9 @@ Vibirding/
 │   │   ├── batch.py                      # 第 2.4 步：确认后的事务化批量写入
 │   │   ├── media.py                      # 第 3.1 步：哈希、校验、文件保存和去重
 │   │   ├── preview.py                    # 第 3.2 步：读取媒体并编排解析预览流水线
-│   │   └── observations.py               # 第 3.4 步：观测列表/详情只读模型
+│   │   └── observations.py               # 第 3.4–3.5 步：观测读取与局部编辑服务
 │   └── api/
-│       └── app.py                        # 第 3.1–3.4 步：FastAPI 工厂和当前 HTTP 路由
+│       └── app.py                        # 第 3.1–3.5 步：FastAPI 工厂和当前 HTTP 路由
 ├── frontend/                             # 后续：React 应用
 ├── evals/                                # 保留 v1 eval，后续新增 v2 用例
 └── scripts/                              # 开发期自检与冒烟脚本
@@ -310,6 +309,10 @@ ObservationDetail extends ObservationSummary
 
 ObservationListResponse
   items: list[ObservationSummary]
+
+ObservationUpdateRequest
+  place? / obs_date? / time_of_day? / species_label? / species_id?
+  count? / behavior? / raw_note? / confidence? / flags?
 ```
 
 ### 4.3 PostgreSQL 表设计
@@ -366,6 +369,7 @@ NULL。`photos` 行代表已经由上传阶段保存到文件系统的媒体元�
 | `services/batch.py` | 第 2.4 步：验证明确确认、锁定媒体、创建 session，以 savepoint 逐条写入并汇总 created/failed。 |
 | `services/assembly.py` | 第 2.5 步：消费 dry-run 结果，复制并补全草稿、合并未匹配照片，输出统一确认前的 `ParseResult`；不写库。 |
 | `services/preview.py` | 第 3.2 步：校验并读取 `media_ids`，按请求顺序构造照片输入，编排拆分、识别和预览组装；只读数据库。 |
+| `services/observations.py` | 第 3.4–3.5 步：构造观测列表/详情安全读模型，并在事务内执行单条可编辑字段更新。 |
 | `api/app.py` | 第 3.1 步起：FastAPI 应用工厂、路由装配、依赖注入和 HTTP 错误映射；不直接嵌入业务 SQL。 |
 | `frontend/` | 后续：输入预览确认和记录管理；不重复后端规则。 |
 
@@ -673,6 +677,33 @@ GET /api/observations/{observation_id}
   其照片和可选 session。两个端点都直接查询 PostgreSQL，不调用 LLM/懂鸟/eBird 网络，不修改
   任意数据库行或媒体文件。
 
+### 6.13 第 3.5 步 FastAPI 观测编辑契约
+
+```python
+PATCH /api/observations/{observation_id}
+Content-Type: application/json
+ObservationUpdateRequest
+-> 200 ObservationDetail
+-> 404  # observation 或请求引用的 species_id 不存在
+-> 422  # 空补丁、未知/不可编辑字段、字段类型或日期格式错误
+```
+
+- 请求是局部更新：省略字段保持原值；显式 JSON `null` 清空对应可空字段。允许编辑
+  `place`、`obs_date`、`time_of_day`、`species_label`、`species_id`、`count`、`behavior`、
+  `raw_note`、`confidence`、`flags`。`raw_note` 和 `flags` 不可为 null，但可分别为空字符串和
+  空列表；请求至少包含一个允许字段。
+- 不允许通过此端点修改 `observation_id`、`timestamp`、`source`、`session`、照片、`user_id`
+  或 `sequence_no`；额外字段统一返回 422。3.5 不上传、转移、解除关联或删除媒体文件。
+- `obs_date` 非 null 时必须是 ISO `YYYY-MM-DD`，落库继续保存同格式文本。`species_id` 非 null
+  时必须引用已有名录行，否则返回 404 且整次更新回滚。
+- 为避免展示文字和内部物种键悄悄错配：只提交 `species_label` 而省略 `species_id` 时，更新
+  展示文字并自动清空原 `species_id`；只要提交非 null `species_id`，该 ID 就是物种真值，
+  展示文字统一采用名录行的规范中文名，即使请求同时给了其他 label；显式提交
+  `species_id=null` 只清除规范化关联，`species_label` 是否改变仍由请求决定。
+- 服务在一个数据库事务内用行锁读取并更新目标记录；失败不产生部分字段更新。成功后返回与
+  3.4 完全相同的 `ObservationDetail`，其中照片和 session 只读回显，记录的 `timestamp`、
+  `sequence_no` 及列表顺序保持不变。该端点不调用 LLM/懂鸟/eBird 网络。
+
 ---
 
 ## 7. 批量处理与权限流程（后续第 2 步）
@@ -812,6 +843,8 @@ React 实现应以共享设计 token 和可复用业务组件表达上述设计�
   未知/已认领/重复媒体、严格布尔确认和 created/failed 稳定响应。
 - 3.4 单独覆盖观测读取 HTTP：最新优先、limit/地点/物种/日期筛选、字面量通配符、空结果、
   详情照片/session、v1 无 session 记录、404/400/422、内部字段不泄露和零写入副作用。
+- 3.5 单独覆盖观测编辑 HTTP：单字段/多字段/显式 null、ISO 日期、物种关联一致性、空补丁、
+  未知/不可编辑字段、未知 observation/species、事务回滚、照片/session/身份与列表顺序不变。
 
 ---
 
@@ -830,7 +863,8 @@ React 实现应以共享设计 token 和可复用业务组件表达上述设计�
 | 3.2 FastAPI 解析预览 | `POST /api/parse` 编排已有拆分、识别、匹配与组装服务，只读媒体和名录。 | HTTP 客户端覆盖完整预览、失败降级和零持久化副作用；不接确认写入/React。 |
 | 3.3 FastAPI 确认写入 | `POST /api/observations` 映射明确确认请求并复用批量事务/部分成功服务。 | HTTP 客户端覆盖 201、400/404/409/422、纯照片写入和零未确认副作用。 |
 | 3.4 FastAPI 观测读取 | `GET /api/observations` 列表/筛选和 `GET /api/observations/{id}` 详情，返回照片与 session 上下文。 | HTTP 客户端覆盖筛选、顺序、详情/404、字段边界和零副作用。 |
-| 3.5–3.x Web 后续 | 依次接 observations 编辑/删除和 species API，再按第 8 节实现 React 输入页、管理页和响应式布局。 | API 逐切片验收；UI 覆盖两页完整流程及 1024/736/360px。 |
+| 3.5 FastAPI 观测编辑 | `PATCH /api/observations/{id}` 局部更新管理字段，不改变记录身份、session 或照片归属。 | HTTP 客户端覆盖字段语义、物种一致性、错误回滚及只读关系不变。 |
+| 3.6–3.x Web 后续 | 依次接 observations 删除和 species API，再按第 8 节实现 React 输入页、管理页和响应式布局。 | API 逐切片验收；UI 覆盖两页完整流程及 1024/736/360px。 |
 | 4. 收尾 | README / STATUS / DECISIONS 更新，最终回归，打 `v2.0` tag。 | 文档、测试、发布状态一致。 |
 
 ---
