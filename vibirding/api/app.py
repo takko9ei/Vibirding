@@ -47,6 +47,7 @@ from ..services.media import (
     UnsupportedMediaTypeError,
 )
 from ..services.observations import (
+    ObservationDeleteService,
     ObservationEditService,
     ObservationNotFoundError,
     ObservationQueryError,
@@ -96,6 +97,7 @@ def create_app(
     )
     observation_reader = ObservationReadService(resolved_session_factory)
     observation_editor = ObservationEditService(resolved_session_factory)
+    observation_deleter = ObservationDeleteService(resolved_session_factory)
     app = FastAPI(title="Vibirding API", version="2.0.0")
 
     def get_parse_service() -> _ParsesPreview:
@@ -290,6 +292,24 @@ def create_app(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail=str(exc),
             ) from exc
+
+    @app.delete(
+        "/api/observations/{observation_id}",
+        status_code=status.HTTP_204_NO_CONTENT,
+        response_class=Response,
+        responses={
+            status.HTTP_404_NOT_FOUND: {"description": "Observation not found"}
+        },
+    )
+    def delete_observation(observation_id: UUID) -> Response:
+        try:
+            observation_deleter.delete_observation(observation_id)
+        except ObservationNotFoundError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=str(exc),
+            ) from exc
+        return Response(status_code=status.HTTP_204_NO_CONTENT)
 
     app.mount(
         "/media",

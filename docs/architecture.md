@@ -14,9 +14,9 @@
 **v2 的 PostgreSQL 存储底座已经完成。** PostgreSQL、SQLAlchemy、Alembic 和 psycopg 3
 已经替换 JSONL 持久化，并保留 v1 单条 CLI、工具契约与离线 eval 基线。
 
-**2.1–2.5 和 3.1–3.4 已完成、验证并提交，Web 视觉与响应式方向也已确认。3.5 FastAPI
-观测编辑已经实现并通过回归，当前等待 review。** 本切片建立管理页使用的单条局部更新，
-保持记录身份、批次审计和照片归属不变；review 前不得开始删除、species API、CORS 或 React。
+**2.1–2.5 和 3.1–3.5 已完成、验证并提交，Web 视觉与响应式方向也已确认。3.6 FastAPI
+观测删除已经实现并通过回归，当前等待 review。** 本切片删除一条观测，同时保留 session
+审计、照片元数据和媒体文件；review 前不得开始 species API、CORS 或 React。
 
 **不迁移旧数据。** v1 真实 `data/` 为空；这次是 schema migration，不是数据 migration。
 
@@ -130,9 +130,9 @@ Vibirding/
 │   │   ├── batch.py                      # 第 2.4 步：确认后的事务化批量写入
 │   │   ├── media.py                      # 第 3.1 步：哈希、校验、文件保存和去重
 │   │   ├── preview.py                    # 第 3.2 步：读取媒体并编排解析预览流水线
-│   │   └── observations.py               # 第 3.4–3.5 步：观测读取与局部编辑服务
+│   │   └── observations.py               # 第 3.4–3.6 步：观测读取、编辑与删除服务
 │   └── api/
-│       └── app.py                        # 第 3.1–3.5 步：FastAPI 工厂和当前 HTTP 路由
+│       └── app.py                        # 第 3.1–3.6 步：FastAPI 工厂和当前 HTTP 路由
 ├── frontend/                             # 后续：React 应用
 ├── evals/                                # 保留 v1 eval，后续新增 v2 用例
 └── scripts/                              # 开发期自检与冒烟脚本
@@ -369,7 +369,7 @@ NULL。`photos` 行代表已经由上传阶段保存到文件系统的媒体元�
 | `services/batch.py` | 第 2.4 步：验证明确确认、锁定媒体、创建 session，以 savepoint 逐条写入并汇总 created/failed。 |
 | `services/assembly.py` | 第 2.5 步：消费 dry-run 结果，复制并补全草稿、合并未匹配照片，输出统一确认前的 `ParseResult`；不写库。 |
 | `services/preview.py` | 第 3.2 步：校验并读取 `media_ids`，按请求顺序构造照片输入，编排拆分、识别和预览组装；只读数据库。 |
-| `services/observations.py` | 第 3.4–3.5 步：构造观测列表/详情安全读模型，并在事务内执行单条可编辑字段更新。 |
+| `services/observations.py` | 第 3.4–3.6 步：构造观测安全读模型，并在事务内执行单条编辑或删除。 |
 | `api/app.py` | 第 3.1 步起：FastAPI 应用工厂、路由装配、依赖注入和 HTTP 错误映射；不直接嵌入业务 SQL。 |
 | `frontend/` | 后续：输入预览确认和记录管理；不重复后端规则。 |
 
@@ -704,6 +704,25 @@ ObservationUpdateRequest
   3.4 完全相同的 `ObservationDetail`，其中照片和 session 只读回显，记录的 `timestamp`、
   `sequence_no` 及列表顺序保持不变。该端点不调用 LLM/懂鸟/eBird 网络。
 
+### 6.14 第 3.6 步 FastAPI 观测删除契约
+
+```python
+DELETE /api/observations/{observation_id}
+-> 204  # 成功，无响应体
+-> 404  # observation 不存在或已删除
+-> 422  # observation_id 不是 UUID
+```
+
+- 删除只针对目标 `observations` 行；服务在一个数据库事务内用行锁确认目标仍存在，然后删除。
+  重复删除不会伪装成功，第二次返回 404。该端点不接受请求体，也不提供批量删除。
+- 目标关联的 `photos` 行和哈希命名媒体文件必须保留。既有外键 `ON DELETE SET NULL` 只把这些
+  photo 的 `observation_id` 清空；`session_id` 保持不变，所以原始批次仍可审计，照片也不会被
+  自动视为可供另一批次重新认领的全新媒体。
+- 目标所属 `sessions` 行、同 session 的其他 observation、`species` 名录和其他业务数据不得
+  改动。session 的 completed/partial/failed 表示当时确认写入的结果，不因后续管理删除而重算。
+- 成功使用标准 HTTP 204，响应体为空；删除后列表不再返回目标，详情、编辑和再次删除均返回
+  404。该端点不调用 LLM/懂鸟/eBird 网络，也不删除或改写媒体文件。
+
 ---
 
 ## 7. 批量处理与权限流程（后续第 2 步）
@@ -845,6 +864,8 @@ React 实现应以共享设计 token 和可复用业务组件表达上述设计�
   详情照片/session、v1 无 session 记录、404/400/422、内部字段不泄露和零写入副作用。
 - 3.5 单独覆盖观测编辑 HTTP：单字段/多字段/显式 null、ISO 日期、物种关联一致性、空补丁、
   未知/不可编辑字段、未知 observation/species、事务回滚、照片/session/身份与列表顺序不变。
+- 3.6 单独覆盖观测删除 HTTP：204 空响应、未知/重复/非法 ID、列表和详情消失、同 session 其他
+  记录保留、照片仅解除 observation 关联、session/物种/文件保留，以及 v1 无 session 记录删除。
 
 ---
 
@@ -864,7 +885,8 @@ React 实现应以共享设计 token 和可复用业务组件表达上述设计�
 | 3.3 FastAPI 确认写入 | `POST /api/observations` 映射明确确认请求并复用批量事务/部分成功服务。 | HTTP 客户端覆盖 201、400/404/409/422、纯照片写入和零未确认副作用。 |
 | 3.4 FastAPI 观测读取 | `GET /api/observations` 列表/筛选和 `GET /api/observations/{id}` 详情，返回照片与 session 上下文。 | HTTP 客户端覆盖筛选、顺序、详情/404、字段边界和零副作用。 |
 | 3.5 FastAPI 观测编辑 | `PATCH /api/observations/{id}` 局部更新管理字段，不改变记录身份、session 或照片归属。 | HTTP 客户端覆盖字段语义、物种一致性、错误回滚及只读关系不变。 |
-| 3.6–3.x Web 后续 | 依次接 observations 删除和 species API，再按第 8 节实现 React 输入页、管理页和响应式布局。 | API 逐切片验收；UI 覆盖两页完整流程及 1024/736/360px。 |
+| 3.6 FastAPI 观测删除 | `DELETE /api/observations/{id}` 删除单条记录，保留 session、照片元数据和媒体文件。 | HTTP 客户端覆盖 204/404/422、外键解除、审计/文件保留和 v1 记录。 |
+| 3.7–3.x Web 后续 | 接 species API，再按第 8 节实现 React 输入页、管理页和响应式布局。 | API 逐切片验收；UI 覆盖两页完整流程及 1024/736/360px。 |
 | 4. 收尾 | README / STATUS / DECISIONS 更新，最终回归，打 `v2.0` tag。 | 文档、测试、发布状态一致。 |
 
 ---

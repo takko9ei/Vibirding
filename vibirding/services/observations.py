@@ -1,4 +1,4 @@
-"""Read models for observation list and management detail endpoints."""
+"""Observation read models and transaction-scoped management operations."""
 
 from __future__ import annotations
 
@@ -213,6 +213,24 @@ class ObservationEditService:
                 f"species not found: {species_id}"
             )
         changes["species_label"] = species_row.canonical_chinese_name
+
+
+class ObservationDeleteService:
+    """Delete one observation while preserving its audit and media records."""
+
+    def __init__(self, session_factory: SessionFactory) -> None:
+        self._session_factory = session_factory
+
+    def delete_observation(self, observation_id: UUID) -> None:
+        with self._session_factory() as session:
+            with session.begin():
+                repository = ObservationRepository(session)
+                row = repository.get_for_update(observation_id)
+                if row is None:
+                    raise ObservationNotFoundError(
+                        f"observation not found: {observation_id}"
+                    )
+                repository.delete(row)
 
 
 def _detail_for_row(session, row: ObservationRow) -> ObservationDetail:

@@ -129,6 +129,11 @@ class ObservationRepository:
             setattr(row, field_name, value)
         self._session.flush()
 
+    def delete(self, row: ObservationRow) -> None:
+        """Delete one row; database foreign keys detach linked photos."""
+        self._session.delete(row)
+        self._session.flush()
+
     def append_draft(
         self,
         draft: DraftObservation,

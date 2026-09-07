@@ -3,7 +3,7 @@
 > 本文件只做冷启动进度摘要。完整目录、数据结构、契约和实施边界以
 > [architecture.md](architecture.md) 为唯一事实来源。
 
-最后更新：2026-09-06。
+最后更新：2026-09-07。
 
 ## 当前状态
 
@@ -20,7 +20,8 @@
 - v2 **3.2 FastAPI 解析预览已实现、验证并提交**。
 - v2 **3.3 FastAPI 批量确认写入已实现、验证并提交**。
 - v2 **3.4 FastAPI 观测读取已实现、验证并提交**。
-- v2 **3.5 FastAPI 观测编辑已实现并验证，当前等待 review**。
+- v2 **3.5 FastAPI 观测编辑已实现、验证并提交**。
+- v2 **3.6 FastAPI 观测删除已实现并验证，当前等待 review**。
 
 ## v2 第 1 步已交付
 
@@ -49,6 +50,7 @@ JSONB `flags` 和可空 `user_id`。本切片未引入批量、照片、物种�
 | 3.3 FastAPI 批量确认写入 HTTP 测试 | 50/50 |
 | 3.4 FastAPI 观测读取 HTTP 测试 | 42/42 |
 | 3.5 FastAPI 观测编辑 HTTP 测试 | 30/30 |
+| 3.6 FastAPI 观测删除 HTTP 测试 | 28/28 |
 | PostgreSQL 存储与 v1 Log 兼容语义 | 38/38 |
 | S1/S3/S4/S6 离线自检 | 101/101 |
 | v1 离线 eval | 13/13 |
@@ -166,6 +168,17 @@ JSONB `flags` 和可空 `user_id`。本切片未引入批量、照片、物种�
 - 更新在单个事务和目标行锁内完成，成功直接返回 3.4 的完整详情；不调用模型或外部网络，
   不创建业务行、不修改媒体文件。
 
+## v2 3.6 本次交付
+
+- 新增 `DELETE /api/observations/{id}`；成功返回标准 204 空响应，未知或已经删除的记录返回
+  404，非法 UUID 返回 422。
+- 删除在单个事务和目标行锁内完成，只删除 observation。数据库现有 `ON DELETE SET NULL`
+  外键会解除照片的 observation 关联，但保留照片元数据、原 session 归属和磁盘媒体文件。
+- session 的原始笔记与写入状态、同批其他记录、species 名录均保持不变；即使删除 session 的
+  最后一条 observation，也不会删除或重算该审计 session。
+- 删除后列表、详情与编辑都不再看到目标；媒体 URL 仍可读取。v1 无 session 的兼容记录使用
+  同一端点删除，不需要特殊分支。
+
 ## 运行要求
 
 1. `.env` 设置 `DATABASE_URL`；本地默认值见根目录 `.env.example`。
@@ -190,6 +203,7 @@ PostgreSQL volume 持久保存数据；`docker compose down -v` 会删除该 vol
 - `scripts/check_v2_observations_api.py`：3.3 确认写入 HTTP、事务和部分成功验证。
 - `scripts/check_v2_observation_reads_api.py`：3.4 观测列表、筛选、详情和零副作用验证。
 - `scripts/check_v2_observation_edit_api.py`：3.5 局部编辑、物种一致性、错误回滚和关系不变验证。
+- `scripts/check_v2_observation_delete_api.py`：3.6 删除响应、关系解除、审计/媒体保留和 v1 删除验证。
 - `scripts/import_ebird_taxonomy.py`：从 eBird API 幂等导入当前物种名录。
 - `scripts/db_test_support.py`：测试 schema 隔离。
 - `scripts/run_s2.py`：Gemini 备用 provider 手动冒烟。
@@ -200,4 +214,4 @@ PostgreSQL volume 持久保存数据；`docker compose down -v` 会删除该 vol
 
 ## 当前 review 边界
 
-当前只 review 3.5 FastAPI 观测编辑；通过并提交后再开始 3.6，不得提前接入其他 API 或 React。
+当前只 review 3.6 FastAPI 观测删除；通过并提交后再开始 3.7，不得提前接入 species API 或 React。
