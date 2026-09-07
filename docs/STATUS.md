@@ -22,7 +22,8 @@
 - v2 **3.4 FastAPI 观测读取已实现、验证并提交**。
 - v2 **3.5 FastAPI 观测编辑已实现、验证并提交**。
 - v2 **3.6 FastAPI 观测删除已实现、验证并提交**。
-- v2 **3.7 FastAPI 物种查询已实现并验证，当前等待 review**。
+- v2 **3.7 FastAPI 物种查询已实现、验证并提交**。
+- v2 **3.8 API 总体验收已实现并通过，当前等待 review**。
 
 ## v2 第 1 步已交付
 
@@ -53,9 +54,13 @@ JSONB `flags` 和可空 `user_id`。本切片未引入批量、照片、物种�
 | 3.5 FastAPI 观测编辑 HTTP 测试 | 30/30 |
 | 3.6 FastAPI 观测删除 HTTP 测试 | 28/28 |
 | 3.7 FastAPI 物种查询 HTTP 测试 | 21/21 |
+| 3.8 真实 Uvicorn API 完整生命周期验收 | 37/37 |
+| 3.1–3.7 API 切片回归合计 | 242/242 |
+| 2.1–2.5 v2 服务回归合计 | 156/156 |
 | PostgreSQL 存储与 v1 Log 兼容语义 | 38/38 |
 | S1/S3/S4/S6 离线自检 | 101/101 |
 | v1 离线 eval | 13/13 |
+| 3.8 本轮自动检查总计 | 611/611 |
 | 开发库 species | 11,167 条（eBird 当前名录） |
 | 开发库 observations | 0 条 |
 | 开发库 sessions / photos | 0 / 0 条 |
@@ -192,6 +197,19 @@ JSONB `flags` 和可空 `user_id`。本切片未引入批量、照片、物种�
 - 过滤、排序和 limit 均在 PostgreSQL 内完成，不把完整名录加载进应用内存；开发库 11,167
   条真实名录的 `Corvus` 查询实测约 68 ms，不访问 eBird 或修改数据库。
 
+## v2 3.8 本次交付
+
+- 新增独立 API 总体验收脚本，在临时 PostgreSQL schema 与临时媒体目录中启动真实 Uvicorn，
+  通过 loopback HTTP 连续走完上传、解析预览、确认入库、列表/详情、物种联想、编辑和删除。
+- 验收同时检查 OpenAPI 的 8 个方法/路径、关键公开 schema 与 201/204 状态码，避免“实现能跑，
+  但接口文档或对外契约漏登记”。
+- 解析阶段使用确定性的离线 provider stub，但仍经过正式文本拆分、照片预处理、taxonomy、
+  dry-run 匹配和预览组装服务；因此不消耗 DeepSeek、懂鸟或 eBird 配额。
+- 覆盖 parse 与未确认请求零写入、确认后的三类业务关系、编辑不改关联、删除只解除目标照片关联、
+  session 与媒体保留，以及服务停止后临时 schema/目录均被清理。
+- 重新运行全部 3.1–3.7 API、2.1–2.5 服务、migration、v1 自检和离线 eval；本轮合计
+  611/611 通过，开发库没有留下验收数据。
+
 ## 运行要求
 
 1. `.env` 设置 `DATABASE_URL`；本地默认值见根目录 `.env.example`。
@@ -218,6 +236,7 @@ PostgreSQL volume 持久保存数据；`docker compose down -v` 会删除该 vol
 - `scripts/check_v2_observation_edit_api.py`：3.5 局部编辑、物种一致性、错误回滚和关系不变验证。
 - `scripts/check_v2_observation_delete_api.py`：3.6 删除响应、关系解除、审计/媒体保留和 v1 删除验证。
 - `scripts/check_v2_species_api.py`：3.7 名称搜索、相关度排序、参数边界和零副作用验证。
+- `scripts/check_v2_api_acceptance.py`：3.8 真实 Uvicorn、完整 API 生命周期、OpenAPI 与隔离清理验收。
 - `scripts/import_ebird_taxonomy.py`：从 eBird API 幂等导入当前物种名录。
 - `scripts/db_test_support.py`：测试 schema 隔离。
 - `scripts/run_s2.py`：Gemini 备用 provider 手动冒烟。
@@ -228,4 +247,4 @@ PostgreSQL volume 持久保存数据；`docker compose down -v` 会删除该 vol
 
 ## 当前 review 边界
 
-当前只 review 3.7 FastAPI 物种查询；通过并提交后再开始 3.8，不得提前接入 CORS 或 React。
+当前只 review 3.8 API 总体验收；通过并提交后再开始 3.9 React 基础工程，不得提前实现输入页。

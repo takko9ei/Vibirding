@@ -87,7 +87,7 @@ python scripts/import_ebird_taxonomy.py
 以上三条命令分别负责启动本地 PostgreSQL、把数据库结构升级到当前版本，以及从 eBird
 幂等导入当前物种名录。`DATABASE_URL` 已在 `.env.example` 中给出本地默认值。
 
-**启动当前 Web API（v2 3.1–3.7）**：
+**启动当前 Web API（v2 3.1–3.8）**：
 
 ```bash
 python -m uvicorn vibirding.api.app:create_app --factory --reload
@@ -194,6 +194,15 @@ python -m vibirding "傍晚葛西临海公园家燕十几只在低空飞"
 python evals/run_evals.py     # 离线 eval，应 13/13
 ```
 
+**API 总体验收**（同样不调用外部 provider，但会启动一个临时 Uvicorn 服务）：
+
+```bash
+python scripts/check_v2_api_acceptance.py     # 应 37/37
+```
+
+该脚本使用独立临时数据库 schema 和媒体目录，通过真实 HTTP 走完上传、解析、确认、读取、
+物种查询、编辑和删除；结束后会自动清理测试数据。
+
 ---
 
 ## 用法
@@ -293,7 +302,9 @@ docker-compose.yml  # 本地 PostgreSQL 服务
 - **3.4 已完成并提交**：FastAPI 最新记录列表、筛选、照片与 session 详情读取。
 - **3.5 已完成并提交**：FastAPI 观测记录局部编辑与事务回滚。
 - **3.6 已完成并提交**：FastAPI 单条观测删除，并保留 session 与媒体审计。
-- **3.7 已实现、待 review**：FastAPI 本地物种名录查询与稳定相关度排序。
-- **3.8–3.x**：实现 React 输入预览页、记录管理页和响应式布局，需要时先冻结开发代理/CORS 契约。
+- **3.7 已完成并提交**：FastAPI 本地物种名录查询与稳定相关度排序。
+- **3.8 已实现、待 review**：真实 Uvicorn 下的 API 完整生命周期、OpenAPI 与全量回归验收。
+- **3.9**：搭建 React + TypeScript 基础工程、双路由、共享设计 token、API client 与开发代理。
+- **3.10–3.12**：实现输入流程、记录管理流程，再完成端到端和响应式总体验收。
 
 完整范围与切片顺序见 [docs/architecture.md](docs/architecture.md) §10。

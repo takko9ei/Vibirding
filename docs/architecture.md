@@ -14,9 +14,10 @@
 **v2 的 PostgreSQL 存储底座已经完成。** PostgreSQL、SQLAlchemy、Alembic 和 psycopg 3
 已经替换 JSONL 持久化，并保留 v1 单条 CLI、工具契约与离线 eval 基线。
 
-**2.1–2.5 和 3.1–3.6 已完成、验证并提交，Web 视觉与响应式方向也已确认。3.7 FastAPI
-物种查询已经实现并通过回归，当前等待 review。** 本切片为编辑表单提供本地名录联想，只读
-PostgreSQL，不调用 eBird 网络；review 前不得开始 CORS 或 React。
+**2.1–2.5 和 3.1–3.7 已完成、验证并提交，Web 视觉与响应式方向也已确认。3.8 API
+总体验收与联调已经实现并通过，当前等待 review。** 本切片没有增加接口或业务能力；已验证
+真实 Uvicorn 下从上传、预览、确认到查询、物种联想、编辑和删除的完整生命周期。review 前
+不得开始 CORS 或 React。
 
 **不迁移旧数据。** v1 真实 `data/` 为空；这次是 schema migration，不是数据 migration。
 
@@ -895,6 +896,15 @@ React 实现应以共享设计 token 和可复用业务组件表达上述设计�
   记录保留、照片仅解除 observation 关联、session/物种/文件保留，以及 v1 无 session 记录删除。
 - 3.7 单独覆盖物种查询 HTTP：三类名称字段、完全/前缀/子串排序、大小写/Unicode/空白、字面量
   通配符、limit、空结果、400/422、公开字段边界，以及零网络和零数据库写入。
+- 3.8 在独立临时 schema 与媒体目录中启动真实 Uvicorn，通过真实 loopback HTTP 连续执行
+  `media -> parse -> observations POST -> observations GET/detail -> species -> PATCH -> DELETE`。
+  解析阶段使用离线确定性 provider stub，但必须经过正式拆分、照片预处理、taxonomy、匹配和
+  组装服务；不得调用真实 DeepSeek/懂鸟/eBird，不得污染开发库或消耗配额。
+- 3.8 核对 OpenAPI 已登记 8 个方法/路径组合、关键请求/响应 schema 和状态码；核对未确认零
+  写入、parse 零写入、确认后的 session/photo/observation 关系、编辑关系不变、删除后媒体与
+  session 保留，以及最终临时 schema/目录清理。
+- 3.8 还必须重新运行 3.1–3.7 HTTP 回归、2.1–2.5 服务回归、migration、v1 自检和离线 eval。
+  验收中发现缺陷可以在本切片修复并回归，但不得借机增加新 API。
 
 ---
 
@@ -916,7 +926,11 @@ React 实现应以共享设计 token 和可复用业务组件表达上述设计�
 | 3.5 FastAPI 观测编辑 | `PATCH /api/observations/{id}` 局部更新管理字段，不改变记录身份、session 或照片归属。 | HTTP 客户端覆盖字段语义、物种一致性、错误回滚及只读关系不变。 |
 | 3.6 FastAPI 观测删除 | `DELETE /api/observations/{id}` 删除单条记录，保留 session、照片元数据和媒体文件。 | HTTP 客户端覆盖 204/404/422、外键解除、审计/文件保留和 v1 记录。 |
 | 3.7 FastAPI 物种查询 | `GET /api/species` 从本地名录提供有界、稳定排序的名称联想。 | HTTP 客户端覆盖字段、匹配/排序、边界错误和零副作用。 |
-| 3.8–3.x React | 按第 8 节实现输入页、管理页和响应式布局；需要时先冻结 CORS/开发代理契约。 | UI 覆盖两页完整流程及 1024/736/360px。 |
+| 3.8 API 总体验收 | 不新增接口；真实 Uvicorn + 独立数据库/媒体环境串行验收 3.1–3.7 完整生命周期与 OpenAPI。 | 端到端链路、状态码、持久化/回滚/媒体边界、全量自动回归和零开发库污染全部通过。 |
+| 3.9 React 基础工程 | Vite + React + TypeScript、双路由、设计 token、API client 与本地开发代理。 | TypeScript、production build、双路由和基础响应式布局通过。 |
+| 3.10 React 输入流程 | “记一笔”接上传、解析预览、草稿编辑、确认及部分成功结果。 | 纯文本/纯照片/混合输入及 loading/错误/重试/防重复提交。 |
+| 3.11 React 管理流程 | “观察记录”接筛选、列表、详情、物种联想、编辑和二次确认删除。 | 空态/失败/编辑/删除完整可用。 |
+| 3.12 前端总体验收 | 两页端到端联调、视觉/键盘/触控和 1024/736/360px 响应式验收。 | 无页面级横向溢出，焦点和触控目标合格，全部核心流程可完成。 |
 | 4. 收尾 | README / STATUS / DECISIONS 更新，最终回归，打 `v2.0` tag。 | 文档、测试、发布状态一致。 |
 
 ---
