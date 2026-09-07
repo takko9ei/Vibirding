@@ -1,0 +1,134 @@
+# v2 2.6 eval inputs and deterministic provider fixtures.
+# Expected final ParseResult assertions live separately in v2_answers.yaml.
+
+- id: v2t00
+  input_text: "今天上午在井之头公园看见三只灰喜鹊、两只普通鸬鹚和一只树麻雀"
+  split_payload:
+    shared_context:
+      place: "井之头公园"
+      obs_date: "2026-09-07"
+      time_of_day: "上午"
+    observations:
+      - species_label: "灰喜鹊"
+        count: 3
+        raw_note: "三只灰喜鹊"
+      - species_label: "普通鸬鹚"
+        count: 2
+        raw_note: "两只普通鸬鹚"
+      - species_label: "树麻雀"
+        count: 1
+        raw_note: "一只树麻雀"
+  photos: []
+
+- id: v2t01
+  input_text: "葛西临海公园看见一只山喜鹊"
+  split_payload:
+    shared_context:
+      place: "葛西临海公园"
+      obs_date: "2026-09-06"
+      time_of_day: null
+    observations:
+      - species_label: "山喜鹊"
+        count: 1
+        raw_note: "一只山喜鹊"
+  photos:
+    - key: grey_1
+      result:
+        status: identified
+        targets:
+          - - species_label: "Azure-winged Magpie"
+              scientific_name: "Cyanopica cyanus"
+              confidence: 97
+    - key: grey_2
+      result:
+        status: identified
+        targets:
+          - - species_label: "灰喜鹊"
+              scientific_name: "Cyanopica cyanus"
+              confidence: 94
+
+- id: v2t02
+  input_text: "上午在水元公园看到两只灰喜鹊，照片里还拍到了鸬鹚"
+  split_payload:
+    shared_context:
+      place: "水元公园"
+      obs_date: "2026-09-05"
+      time_of_day: "上午"
+    observations:
+      - species_label: "灰喜鹊"
+        count: 2
+        raw_note: "两只灰喜鹊"
+  photos:
+    - key: cormorant_1
+      result:
+        status: identified
+        targets:
+          - - species_label: "普通鸬鹚"
+              scientific_name: "Phalacrocorax carbo"
+              confidence: 92
+    - key: cormorant_2
+      result:
+        status: identified
+        targets:
+          - - species_label: "鸬鹚"
+              scientific_name: "Phalacrocorax carbo"
+              confidence: 89
+
+- id: v2t03
+  input_text: "河边看见一只乌鸦"
+  split_payload:
+    shared_context:
+      place: "河边"
+      obs_date: null
+      time_of_day: null
+    observations:
+      - species_label: "乌鸦"
+        count: 1
+        raw_note: "一只乌鸦"
+  photos:
+    - key: ambiguous_crow
+      result:
+        status: identified
+        targets:
+          - - species_label: "乌鸦"
+              confidence: 70
+    - key: unknown_bird
+      result:
+        status: identified
+        targets:
+          - - species_label: "神秘鸟"
+              confidence: 55
+
+- id: v2t04
+  input_text: ""
+  split_payload: null
+  photos:
+    - key: no_bird
+      result:
+        status: unrecognized
+        message: "没有检测到鸟"
+    - key: provider_failed
+      result:
+        status: failed
+        message: "provider timeout"
+
+- id: v2t05
+  input_text: "同一棵树上分别记了灰喜鹊和山喜鹊"
+  split_payload:
+    shared_context:
+      place: "井之头公园"
+      obs_date: "2026-09-04"
+      time_of_day: null
+    observations:
+      - species_label: "灰喜鹊"
+        raw_note: "灰喜鹊"
+      - species_label: "山喜鹊"
+        raw_note: "山喜鹊"
+  photos:
+    - key: one_grey_photo
+      result:
+        status: identified
+        targets:
+          - - species_label: "灰喜鹊"
+              scientific_name: "Cyanopica cyanus"
+              confidence: 96

@@ -24,9 +24,8 @@
 - v2 **3.6 FastAPI 观测删除已实现、验证并提交**。
 - v2 **3.7 FastAPI 物种查询已实现、验证并提交**。
 - v2 **3.8 API 总体验收已实现、验证并提交**。
-- v2 **3.9 React 基础工程已实现并通过验证，当前等待 review**。
-- 计划校准发现原始需求中的 **2.6 v2 固定 eval 尚未实现**；3.9 review/提交后先补 2.6，
-  再进入 3.10。
+- v2 **3.9 React 基础工程已实现、验证并提交**。
+- 原始需求中遗漏的 **2.6 v2 固定 eval 已补齐并通过验证，当前等待 review**。
 
 ## v2 第 1 步已交付
 
@@ -60,6 +59,9 @@ JSONB `flags` 和可空 `user_id`。本切片未引入批量、照片、物种�
 | 3.8 真实 Uvicorn API 完整生命周期验收 | 37/37 |
 | 3.9 TypeScript / lint / production build | 全部通过 |
 | 3.9 双路由与 Vite → FastAPI 开发代理 | HTTP 200 |
+| 2.6 v2 固定离线 eval | 6/6 |
+| 2.6 本轮回归（v2 领域 + v1 eval） | 169/169 |
+| 2.6 本轮全部自动检查 | 175/175 |
 | 3.1–3.7 API 切片回归合计 | 242/242 |
 | 2.1–2.5 v2 服务回归合计 | 156/156 |
 | PostgreSQL 存储与 v1 Log 兼容语义 | 38/38 |
@@ -230,6 +232,18 @@ JSONB `flags` 和可空 `user_id`。本切片未引入批量、照片、物种�
 - `npm run typecheck`、`npm run lint` 和 `npm run build` 全部通过；两个前端路由均返回 200，
   v1 离线 eval 保持 13/13。
 
+## v2 2.6 本次交付
+
+- 新增 `v2_tasks.yaml` 与 `v2_answers.yaml`，固定 6 条批量解析/匹配用例，并继续保持题目和
+  最终断言分离。
+- 题目文件提供确定性的模型和照片 provider fixture；runner 先让正式 2.1–2.5 服务运行，
+  再使用答案文件评分，不根据答案合成被测服务输出。
+- 覆盖多物种拆分与共享上下文、别名文字和科学名照片按同一 `species_id` 匹配、同种多图、
+  未匹配照片合并成待确认草稿、同种多文本不擅自分配，以及歧义/未映射/未识别/失败警告。
+- 每条用例使用独立 PostgreSQL 临时 schema 和临时图片目录，只使用 MockClient/provider stub；
+  不调用外部网络，也不写开发库。
+- v2 固定 eval 为 6/6，2.1–2.5 领域回归为 156/156，v1 离线 eval 为 13/13。
+
 ## 运行要求
 
 1. `.env` 设置 `DATABASE_URL`；本地默认值见根目录 `.env.example`。
@@ -264,10 +278,11 @@ PostgreSQL volume 持久保存数据；`docker compose down -v` 会删除该 vol
 - `scripts/run_s2.py`：Gemini 备用 provider 手动冒烟。
 - `scripts/run_s6.py`：预算耗尽和工具失败手动演示。
 - `evals/run_evals.py`：离线/在线两档 eval。
+- `evals/run_v2_evals.py`：2.6 批量拆分、名录匹配与预览组装的固定离线 eval。
 
 正式交付入口始终是 `python -m vibirding`。
 
 ## 当前 review 边界
 
-当前只 review 3.9 React 基础工程；通过并提交后，下一个开发切片是 2.6 v2 固定 eval。
-固定后续顺序为 `2.6 → 3.10 → 3.11 → 3.12 → 4`，不得跳步或临时改号。
+当前只 review 2.6 v2 固定 eval；通过并提交后，下一个开发切片是 3.10 React 输入流程。
+固定后续顺序为 `3.10 → 3.11 → 3.12 → 4`，不得跳步或临时改号。

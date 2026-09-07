@@ -1,0 +1,130 @@
+# v2 2.6 final-result assertions. The runner reads these only for grading after
+# the formal 2.1-2.5 services have produced a ParseResult.
+
+- id: v2t00
+  expected:
+    draft_order: [draft-1, draft-2, draft-3]
+    drafts:
+      - client_draft_id: draft-1
+        species_key: grey_treepie
+        place: "井之头公园"
+        obs_date: "2026-09-07"
+        time_of_day: "上午"
+        count: 3
+        photo_keys: []
+        needs_confirmation: false
+      - client_draft_id: draft-2
+        species_key: great_cormorant
+        place: "井之头公园"
+        obs_date: "2026-09-07"
+        time_of_day: "上午"
+        count: 2
+        photo_keys: []
+        needs_confirmation: false
+      - client_draft_id: draft-3
+        species_key: tree_sparrow
+        place: "井之头公园"
+        obs_date: "2026-09-07"
+        time_of_day: "上午"
+        count: 1
+        photo_keys: []
+        needs_confirmation: false
+    unmatched: []
+    warnings_contain: []
+    split_calls: 1
+    photo_calls: 0
+
+- id: v2t01
+  expected:
+    draft_order: [draft-1]
+    drafts:
+      - client_draft_id: draft-1
+        species_key: grey_treepie
+        place: "葛西临海公园"
+        count: 1
+        source: user
+        photo_keys: [grey_1, grey_2]
+        needs_confirmation: false
+    unmatched: []
+    warnings_contain: []
+    split_calls: 1
+    photo_calls: 2
+
+- id: v2t02
+  expected:
+    draft_order: [draft-1, photo-draft-1]
+    drafts:
+      - client_draft_id: draft-1
+        species_key: grey_treepie
+        place: "水元公园"
+        count: 2
+        photo_keys: []
+        needs_confirmation: false
+      - client_draft_id: photo-draft-1
+        species_key: great_cormorant
+        species_label: "普通鸬鹚"
+        place: "水元公园"
+        obs_date: "2026-09-05"
+        time_of_day: "上午"
+        count: null
+        source: bird_id
+        flags_contain: [auto_created_from_unmatched_photo]
+        photo_keys: [cormorant_1, cormorant_2]
+        needs_confirmation: true
+    unmatched:
+      - photo_key: cormorant_1
+        client_draft_id: photo-draft-1
+      - photo_key: cormorant_2
+        client_draft_id: photo-draft-1
+    warnings_contain:
+      - "照片物种没有对应的文本草稿"
+    split_calls: 1
+    photo_calls: 2
+
+- id: v2t03
+  expected:
+    draft_order: [draft-1]
+    drafts:
+      - client_draft_id: draft-1
+        species_key: null
+        place: "河边"
+        count: 1
+        photo_keys: []
+        needs_confirmation: true
+    unmatched: []
+    warnings_contain:
+      - "名称 乌鸦 命中多个物种"
+      - "物种名录中找不到：神秘鸟"
+    split_calls: 1
+    photo_calls: 2
+
+- id: v2t04
+  expected:
+    draft_order: []
+    drafts: []
+    unmatched: []
+    warnings_contain:
+      - "没有检测到鸟"
+      - "provider timeout"
+    split_calls: 0
+    photo_calls: 2
+
+- id: v2t05
+  expected:
+    draft_order: [draft-1, draft-2]
+    drafts:
+      - client_draft_id: draft-1
+        species_key: grey_treepie
+        place: "井之头公园"
+        photo_keys: []
+        needs_confirmation: false
+      - client_draft_id: draft-2
+        species_key: grey_treepie
+        place: "井之头公园"
+        photo_keys: []
+        needs_confirmation: false
+    unmatched: []
+    warnings_contain:
+      - "照片物种对应多个文本草稿：draft-1、draft-2"
+    split_calls: 1
+    photo_calls: 1

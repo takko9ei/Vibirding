@@ -192,6 +192,7 @@ python -m vibirding "傍晚葛西临海公园家燕十几只在低空飞"
 
 ```bash
 python evals/run_evals.py     # 离线 eval，应 13/13
+python evals/run_v2_evals.py  # v2 批量解析与匹配 eval，应 6/6
 ```
 
 **API 总体验收**（同样不调用外部 provider，但会启动一个临时 Uvicorn 服务）：
@@ -317,8 +318,8 @@ frontend/           # Vite + React + TypeScript 双页 Web 应用
 - **3.6 已完成并提交**：FastAPI 单条观测删除，并保留 session 与媒体审计。
 - **3.7 已完成并提交**：FastAPI 本地物种名录查询与稳定相关度排序。
 - **3.8 已完成并提交**：真实 Uvicorn 下的 API 完整生命周期、OpenAPI 与全量回归验收。
-- **3.9 已实现、待 review**：React + TypeScript 基础工程、双路由、共享设计 token、API client 与开发代理。
-- **2.6 待补齐**：增加原始需求承诺的 v2 固定离线 eval；3.9 提交后优先执行。
+- **3.9 已完成并提交**：React + TypeScript 基础工程、双路由、共享设计 token、API client 与开发代理。
+- **2.6 已实现、待 review**：增加原始需求承诺的 6 条 v2 固定离线 eval。
 - **3.10**：实现输入流程，包括上传、解析预览、草稿编辑和确认写入。
 - **3.11**：实现记录管理流程，包括筛选、详情、物种联想、编辑和删除。
 - **3.12**：完成两页端到端、视觉、键盘、触控和响应式总体验收。
